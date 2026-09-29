@@ -1,0 +1,12 @@
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.git
+.gitignore
+.env
+data/*.db
+data/*_attachments
+output
+tests/__pycache__
+.gemini

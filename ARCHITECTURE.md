@@ -1,0 +1,35 @@
+# Архитектура
+
+Проект разделён на веб-приложение и интеграцию с мессенджерами.
+
+```text
+app.py                 HTTP API, доменная логика и SQLite-сервисы
+bot/
+  providers.py         Telegram/MAX: конфигурация, нормализация и доставка
+  routes.py            pairing, настройки и webhook-эндпоинты
+  service.py           единый сценарный движок бота
+  storage.py           SQLite-схема состояния бота
+  worker.py            отдельный durable worker очереди доставки
+tests/
+scripts/
+web/
+```
+
+`app.py` остаётся точкой входа веб-сервера (`uvicorn app:app`). Бот не дублирует бизнес-правила: `bot.service.BotEngine` получает веб-приложение как domain adapter и вызывает его сервисы для заявок, чатов, оценок и прав доступа.
+
+Webhook-обработка выполняется внутри веб-процесса через `bot.routes`, а отправка исходящих сообщений вынесена в отдельный процесс `python -m bot.worker run`. Это позволяет перезапускать worker независимо от API и повторять доставку через SQLite outbox.
+
+Корневые файлы `bot_*.py` сохранены как тонкие compatibility-shim для старых импортов и тестов. Новый код должен импортировать модули из пакета `bot`.
+
+## Запуск
+
+```powershell
+uvicorn app:app --reload
+python -m bot.worker run
+```
+
+В Docker worker запускается отдельно профилем:
+
+```powershell
+docker compose --profile bots up --build
+```

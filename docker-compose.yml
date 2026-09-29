@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    container_name: desk_app
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - APP_DB=/app/data/app.db
+      - APP_SECURE_COOKIE=0
+      - RATE_LIMIT_PER_MINUTE=60
+      - ADMIN_NAME=Администратор
+      - ADMIN_EMAIL=admin@example.com
+      - ADMIN_PASSWORD=ChangeMeNow123!
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  bot-worker:
+    profiles: ["bots"]
+    build: .
+    container_name: desk_bot_worker
+    restart: unless-stopped
+    command: ["python", "-m", "bot.worker", "run"]
+    depends_on:
+      - app
+    volumes:
+      - ./data:/app/data
+    env_file:
+      - .env
+    environment:
+      - APP_DB=/app/data/app.db

@@ -1,0 +1,17 @@
+{
+  "name": "Линия · Кабинет заявок",
+  "short_name": "Линия",
+  "description": "Сервис-деск и биллинг сопровождения",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#122527",
+  "theme_color": "#137b69",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
