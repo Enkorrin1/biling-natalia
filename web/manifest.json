@@ -1,11 +1,11 @@
 {
-  "name": "Линия · Кабинет заявок",
-  "short_name": "Линия",
+  "name": "Codari · Кабинет заявок",
+  "short_name": "Codari",
   "description": "Сервис-деск и биллинг сопровождения",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#122527",
-  "theme_color": "#137b69",
+  "background_color": "#f1f5f9",
+  "theme_color": "#2563eb",
   "icons": [
     {
       "src": "/icon.svg",

@@ -110,7 +110,7 @@ function initRealtime() {
         const data = JSON.parse(e.data);
         playNotificationSound();
         if (data.type === 'notification') {
-          showBrowserNotification('Линия · Новое уведомление', data.text);
+          showBrowserNotification('Codari · Новое уведомление', data.text);
           await loadNotifications();
         } else if (data.type === 'ticket_message') {
           if (state.view === 'detail' && state.current && state.current.ticket.id === data.ticket_id) {
@@ -189,15 +189,15 @@ async function refresh() {
 }
 function renderAuth() {
   const registration = state.authMode === 'register';
-  app.innerHTML = `<div class="auth"><div class="panel auth-card"><div class="eyebrow">Сервисная поддержка</div><h1>${registration?'Создать кабинет':'Войти в кабинет'}</h1><div class="muted">Заявки и общение с командой в одном месте</div>${notice()}<form class="form" id="auth-form">${registration?'<label>Ваше имя<input class="field" name="name" required minlength="2" maxlength="100" autocomplete="name"></label>':''}<label>Email<input class="field" name="email" type="email" required autocomplete="email"></label><label>Пароль<input class="field" name="password" type="password" required minlength="8" autocomplete="${registration?'new-password':'current-password'}"></label><button class="button primary">${registration?'Зарегистрироваться':'Войти'}</button></form><button class="auth-switch" id="auth-switch">${registration?'Уже есть кабинет? Войти':'Нет кабинета? Зарегистрироваться'}</button></div></div>`;
+  app.innerHTML = `<div class="auth"><div class="panel auth-card"><div class="brand auth-brand"><span class="brand-mark" aria-hidden="true">C</span><span>Codari<span class="brand-dot">.</span></span></div><h1>${registration?'Создать кабинет':'Войти в кабинет'}</h1><div class="muted">Заявки и общение с командой в одном месте</div>${notice()}<form class="form" id="auth-form">${registration?'<label>Ваше имя<input class="field" name="name" required minlength="2" maxlength="100" autocomplete="name"></label>':''}<label>Email<input class="field" name="email" type="email" required autocomplete="email"></label><label>Пароль<input class="field" name="password" type="password" required minlength="8" autocomplete="${registration?'new-password':'current-password'}"></label><button class="button primary">${registration?'Зарегистрироваться':'Войти'}</button></form><button class="auth-switch" id="auth-switch">${registration?'Уже есть кабинет? Войти':'Нет кабинета? Зарегистрироваться'}</button></div></div>`;
   document.querySelector('#auth-switch').onclick=()=>{state.authMode=registration?'login':'register';state.error='';renderAuth();};
   document.querySelector('#auth-form').onsubmit=async e=>{e.preventDefault(); const button=e.target.querySelector('button');button.disabled=true;const data=Object.fromEntries(new FormData(e.target));try{state.user=await api(registration?'/register':'/login',{method:'POST',body:JSON.stringify(data)});state.view=state.user.role==='customer'?'tickets':'queue';state.error='';await refresh();await openHash();}catch(error){showError(error);}};
 }
 function shell(title, action, body) {
   const staff=state.user.role!=='customer';
-  app.innerHTML=`<div class="shell"><aside><div class="brand">Линия<span class="brand-dot">.</span><small>Кабинет заявок</small></div><nav class="nav"><button class="${state.view==='tickets'||state.view==='detail'?'active':''}" id="nav-tickets">Заявки</button>${staff&&state.user.role==='admin'?'<button class="'+(state.view==='team'?'active':'')+'" id="nav-team">Команда</button>':''}</nav><div class="aside-bottom"><div class="aside-user">${avatar(state.profile)}<div class="aside-user-meta"><strong>${esc(state.user.name)}</strong><small>${esc(staff?(state.profile?.job_title||'Сотрудник'):(state.organizations[0]?.name||state.profile?.company_name||'Заказчик'))}</small></div></div><button id="logout" class="aside-logout">Выйти</button></div></aside><main><div class="top"><div><div class="eyebrow">${staff?'Рабочее место':'Личный кабинет'}</div><h1>${esc(title)}</h1></div>${action||''}</div>${notice()}${body}</main></div>`;
+  app.innerHTML=`<div class="shell"><aside><div class="brand"><span class="brand-mark" aria-hidden="true">C</span><span>Codari<span class="brand-dot">.</span></span></div><nav class="nav"><button class="${state.view==='tickets'||state.view==='detail'?'active':''}" id="nav-tickets">Заявки</button>${staff&&state.user.role==='admin'?'<button class="'+(state.view==='team'?'active':'')+'" id="nav-team">Команда</button>':''}</nav><div class="aside-bottom"><div class="aside-user">${avatar(state.profile)}<div class="aside-user-meta"><strong>${esc(state.user.name)}</strong><small>${esc(staff?(state.profile?.job_title||'Сотрудник'):(state.organizations[0]?.name||state.profile?.company_name||'Заказчик'))}</small></div></div><button id="logout" class="aside-logout">Выйти</button></div></aside><main><div class="top"><div><div class="eyebrow">${staff?'Рабочее место':'Личный кабинет'}</div><h1>${esc(title)}</h1></div>${action||''}</div>${notice()}${body}</main></div>`;
   const unread = state.notifications.filter(n=>!n.read_at).length;
-  if(staff) document.querySelector('#nav-tickets').insertAdjacentHTML('beforebegin',`<button class="${state.view==='queue'?'active':''}" id="nav-queue">Рабочая очередь</button>`);
+  if(staff) document.querySelector('#nav-tickets').insertAdjacentHTML('beforebegin',`<button class="${state.view==='queue'?'active':''}" id="nav-queue">Дашборд</button>`);
   document.querySelector('.nav').insertAdjacentHTML('beforeend',`<button class="${state.view==='chats'||state.view==='chat'?'active':''}" id="nav-chats">Общий чат</button>`);
   document.querySelector('.nav').insertAdjacentHTML('beforeend',`<button class="${state.view==='notifications'?'active':''}" id="nav-notifications">Уведомления <span class="nav-count" id="notification-count">${unread||''}</span></button>`);
   document.querySelector('.nav').insertAdjacentHTML('beforeend',`<button class="${state.view==='profile'?'active':''}" id="nav-profile">Мой профиль</button>`);
@@ -227,27 +227,38 @@ function shell(title, action, body) {
   }
   document.querySelector('.nav').insertAdjacentHTML('beforeend',`<button class="${state.view==='messengers'?'active':''}" id="nav-messengers">Мессенджеры</button>`);
   document.querySelector('#nav-messengers').onclick=()=>openMessengers();
+  const navPaths = {
+    queue:'M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z',
+    tickets:'M9 11l3 3L22 4 M21 12v8H3V4h12',
+    chats:'M21 11a8 8 0 0 1-8 8H8l-5 3V11a8 8 0 0 1 8-8h2a8 8 0 0 1 8 8Z',
+    notifications:'M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9 M10 21h4',
+    profile:'M16 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0 M4 21v-3a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v3',
+    organizations:'M4 21V3h12v18 M16 9h4v12 M8 7h4 M8 11h4 M8 15h4 M2 21h20',
+    team:'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2 M13 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0 M22 21v-2a4 4 0 0 0-3-4 M17 3a4 4 0 0 1 0 8',
+    analytics:'M3 3v18h18 M7 14v3 M12 9v8 M17 5v12',
+    kb:'M3 4h7l2 2 2-2h7v16h-7l-2 2-2-2H3z M12 6v16',
+    billing:'M6 2h12v20l-3-2-3 2-3-2-3 2z M15 7h-4a2 2 0 0 0 0 4h2a2 2 0 0 1 0 4H9 M12 5v12',
+    webhooks:'M8 8l-5 4 5 4 M16 8l5 4-5 4 M14 4l-4 16',
+    messengers:'M22 2 9 15 M22 2l-8 20-5-7-7-5z'
+  };
+  document.querySelectorAll('.nav button').forEach(button=>{
+    const path=navPaths[button.id.replace('nav-','')];
+    if(path) button.insertAdjacentHTML('afterbegin',`<svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${path}"/></svg>`);
+  });
   document.querySelector('#logout').onclick=async()=>{await api('/logout',{method:'POST'});state.user=null;state.current=null;state.bots=null;state.pairings={};state.pendingOps={};state.error='';renderAuth();};
 }
 function recentActivity() {
   const items=state.notifications.slice(0,3).map(n=>`<div class="activity-item"><span class="activity-dot ${n.read_at?'':'fresh'}"></span><div><strong>${esc(n.text)}</strong><small>${date(n.created_at)}</small></div></div>`).join('');
   return `<section class="activity-panel"><div class="activity-heading"><h2>Последние события</h2><span>${state.notifications.length}</span></div>${items||'<p class="muted">Новых событий пока нет.</p>'}</section>`;
 }
-function portfolioOverview() {
-  const all=state.tickets;
-  const total=all.length;
-  const done=all.filter(t=>['done','closed'].includes(t.status)).length;
-  const approved=all.filter(t=>t.estimate_state==='approved').reduce((sum,t)=>sum+(t.effort_minutes||0),0);
-  const decisions=all.filter(t=>t.estimate_state==='pending').length;
-  const parts=[['new','Новые'],['working','В работе'],['waiting','Ожидают'],['done','Выполнены'],['closed','Закрыты']].map(([key,label])=>({key,label,count:all.filter(t=>t.status===key).length}));
-  const chart=parts.filter(p=>p.count).map(p=>`<button class="portfolio-segment ${p.key}" data-overview-filter="${p.key}" style="width:${p.count/total*100}%" aria-label="${p.label}: ${p.count}" title="${p.label}: ${p.count}"></button>`).join('');
-  const legend=parts.map(p=>`<button class="portfolio-legend ${state.filter===p.key?'selected':''}" data-overview-filter="${p.key}"><span class="legend-dot ${p.key}"></span><span class="legend-label">${p.label}</span><strong class="legend-count">${p.count}</strong></button>`).join('');
-  return `<section class="portfolio-overview" aria-label="Сводка по заявкам"><div class="portfolio-progress"><span class="progress-ring" style="--progress:${total?done/total*100:0}%"><strong>${total?Math.round(done/total*100):0}%</strong></span><div><span class="overview-kicker">ИТОГ ПО ЗАЯВКАМ</span><strong>Завершено ${done} из ${total}</strong><small>${total?'Доля выполненных и закрытых':'Появится после первой заявки'}</small></div></div><div class="portfolio-flow"><div class="overview-head"><span class="overview-kicker">ПО СТАТУСАМ</span><strong>${total} ${total===1?'заявка':total<5?'заявки':'заявок'}</strong></div><div class="portfolio-track" role="group" aria-label="Фильтр по статусам заявок">${chart||'<span class="portfolio-track-empty"></span>'}</div><div class="portfolio-legends">${legend}</div></div><div class="portfolio-hours"><span class="overview-kicker">СОГЛАСОВАННЫЕ ЧАСЫ</span><strong>${hours(approved)}</strong><span>${state.user.role==='customer'?`Ожидают вашего решения: ${decisions}`:`Ожидают решения заказчика: ${decisions}`}</span></div></section>`;
-}
+function portfolioOverview() { return queueOverview(); }
 function queueOverview() {
-  const groups=[{label:'Срочно',hint:'Назначить или ответить',count:state.queue.filter(item=>item.priority<=1).length,tone:'urgent'},{label:'В работе',hint:'Оценить и продолжить',count:state.queue.filter(item=>item.priority===2).length,tone:'active'},{label:'Ожидаем',hint:'Решение заказчика',count:state.queue.filter(item=>item.priority>=3).length,tone:'waiting'}];
-  const max=Math.max(1,...groups.map(group=>group.count));
-  return `<section class="queue-overview" aria-label="Состояние рабочей очереди"><div class="queue-overview-intro"><div class="queue-overview-title"><span class="overview-kicker">СЕЙЧАС В РАБОТЕ</span><h2>Рабочая нагрузка</h2></div><div class="queue-overview-total"><strong class="queue-total-num">${state.queue.length}</strong><span class="queue-total-lbl">заявок и диалогов в очереди</span></div></div><div class="queue-overview-bars">${groups.map(group=>`<div class="queue-meter ${group.tone}"><div class="queue-meter-header"><strong class="queue-meter-label">${group.label}</strong><span class="queue-meter-badge ${group.tone}">${group.count}</span></div><div class="meter-track"><span style="width:${group.count/max*100}%"></span></div><small class="queue-meter-hint">${group.hint}</small></div>`).join('')}</div></section>`;
+  const cards=[
+    {label:'АКТИВНЫЕ ЗАЯВКИ',value:state.tickets.filter(t=>!['done','closed'].includes(t.status)).length,hint:state.user.role==='customer'?`В работе: ${state.tickets.filter(t=>t.status==='working').length}`:`${state.queue.filter(item=>item.priority<=1).length} требуют внимания`,tone:'blue',path:'M8 6V3h8v3 M3 6h18v15H3z M8 6v15 M16 6v15'},
+    {label:'СОГЛАСОВАНО ЧАСОВ',value:hours(state.tickets.filter(t=>t.estimate_state==='approved').reduce((sum,t)=>sum+(t.effort_minutes||0),0)),hint:'По одобренным оценкам',tone:'violet',path:'M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0 M12 6v6l4 2'},
+    {label:'ОЖИДАЮТ СОГЛАСОВАНИЯ',value:state.tickets.filter(t=>t.estimate_state==='pending').length,hint:'Оценки отправлены заказчикам',tone:'green',path:'M14 2H5v20h14V7z M14 2v5h5 M8 12h8 M8 16h8'}
+  ];
+  return `<section class="codari-stats" aria-label="Сводка рабочей очереди">${cards.map(card=>`<div class="codari-stat"><span class="stat-icon ${card.tone}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${card.path}"/></svg></span><span class="overview-kicker">${card.label}</span><strong>${card.value}</strong><small>${card.hint}</small></div>`).join('')}</section>`;
 }
 function workloadPanel(){
   const people=state.staff.filter(person=>person.role!=='admin'||state.queue.some(item=>item.assignee_id===person.id));
@@ -288,7 +299,7 @@ function renderQueue() {
   const rows=state.queue.map(item=>`<button class="ticket-row queue-row" data-source="${item.source}" data-record="${item.id}"><span><strong>${item.source==='chat'?'Чат':'№'+item.id+' · '+esc(item.title)}</strong><small>${esc(item.customer_name)} · ${date(item.updated_at)}</small></span><span class="queue-action ${item.priority<3?'actionable':''}">${esc(item.next_action)}</span><span class="muted hide-mobile">${esc(item.assignee_name||'Без ответственного')}</span></button>`).join('');
   const focus=state.queue[0];
   const focusCard=focus?`<section class="focus-panel"><span class="focus-overline">СЛЕДУЮЩЕЕ ДЕЙСТВИЕ · ${focus.source==='chat'?'ОБЩИЙ ЧАТ':'ЗАЯВКА №'+focus.id}</span><h2>${esc(focus.source==='chat'?focus.customer_name:focus.title)}</h2><p>${esc(focus.next_action)}</p><div class="focus-facts"><div><span>Заказчик</span><strong>${esc(focus.customer_name)}</strong></div><div><span>Ответственный</span><strong>${esc(focus.assignee_name||'Не назначен')}</strong></div></div><button class="focus-link" id="focus-queue">Открыть ${focus.source==='chat'?'чат':'заявку'} <span aria-hidden="true">↗</span></button></section>`:'';
-  shell('Рабочая очередь','<button class="button primary" id="new-ticket">+ Новая заявка</button>',`${queueOverview()}<div class="workspace-grid"><div class="panel"><div class="toolbar"><strong>Заявки и общие чаты</strong><span class="muted">${needs?`Требуют внимания: ${needs}`:'Сначала срочные действия'}</span></div>${rows||'<div class="empty"><strong>Очередь пуста</strong>Новых обращений пока нет.</div>'}</div><div class="context-stack">${focusCard}${workloadPanel()}${recentActivity()}</div></div>`);
+  shell('Дашборд','<button class="button primary" id="new-ticket">+ Новая заявка</button>',`${queueOverview()}<div class="workspace-grid"><div class="panel"><div class="toolbar"><strong>Заявки и общие чаты</strong><span class="muted">${needs?`Требуют внимания: ${needs}`:'Сначала срочные действия'}</span></div>${rows||'<div class="empty"><strong>Очередь пуста</strong>Новых обращений пока нет.</div>'}</div><div class="context-stack">${focusCard}${workloadPanel()}${recentActivity()}</div></div>`);
   document.querySelector('#new-ticket').onclick=()=>setView('new');
   document.querySelector('#focus-queue')?.addEventListener('click',()=>focus.source==='chat'?openChat(focus.id):openTicket(focus.id));
   document.querySelectorAll('.queue-row').forEach(el=>el.onclick=()=>el.dataset.source==='chat'?openChat(Number(el.dataset.record)):openTicket(Number(el.dataset.record)));
