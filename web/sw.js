@@ -1,8 +1,10 @@
-const CACHE_NAME = 'codari-v3';
+const CACHE_NAME = 'codari-v4';
 const STATIC_ASSETS = [
   '/',
   '/style.css',
   '/design.css',
+  '/theme.css',
+  '/motion.css',
   '/main.js',
   '/manifest.json',
   '/icon.svg'

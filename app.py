@@ -959,6 +959,16 @@ def design():
     return FileResponse(ROOT / "web" / "design.css", media_type="text/css")
 
 
+@app.get("/theme.css")
+def theme():
+    return FileResponse(ROOT / "web" / "theme.css", media_type="text/css")
+
+
+@app.get("/motion.css")
+def motion():
+    return FileResponse(ROOT / "web" / "motion.css", media_type="text/css")
+
+
 @app.get("/design-concepts")
 def design_concepts():
     return FileResponse(ROOT / "web" / "design-concepts.html")

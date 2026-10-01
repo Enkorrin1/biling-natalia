@@ -1,0 +1,104 @@
+/* Моушен кабинета: короткие, спокойные переходы. Появление контента — только при смене раздела (класс .view-enter ставит shell()). */
+:root {
+  --ease-out: cubic-bezier(0.22, 0.8, 0.24, 1);
+  --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
+  --dur-fast: 140ms;
+  --dur: 220ms;
+  --dur-slow: 420ms;
+}
+
+@keyframes m-rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+@keyframes m-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes m-pop { from { opacity: 0; transform: translateY(8px) scale(0.97); } to { opacity: 1; transform: none; } }
+@keyframes m-grow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+@keyframes m-slide-left { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: none; } }
+@keyframes m-slide-right { from { opacity: 0; transform: translateX(8px); } to { opacity: 1; transform: none; } }
+@keyframes m-badge { 0% { transform: scale(0.6); opacity: 0; } 60% { transform: scale(1.12); opacity: 1; } 100% { transform: scale(1); } }
+
+/* Отклик элементов управления */
+.button, .nav button, .billing-tab, .billing-filter-pill, .billing-btn-sm, .kb-chip, .portfolio-legend, .canned-btn, .focus-link, .back, .auth-switch, .chat-to-ticket {
+  transition: background-color var(--dur-fast) ease, border-color var(--dur-fast) ease, color var(--dur-fast) ease, box-shadow var(--dur) ease, transform var(--dur-fast) var(--ease-out);
+}
+.button:active, .billing-btn-sm:active, .canned-btn:active, .focus-link:active { transform: scale(0.97); }
+.button.primary:hover { box-shadow: 0 6px 16px rgba(31, 95, 209, 0.22); }
+.nav-icon { transition: transform var(--dur) var(--ease-spring); }
+.nav button:hover .nav-icon { transform: translateX(2px); }
+.nav button.active .nav-icon { transform: scale(1.06); }
+
+.field, textarea, select, .toolbar input, .toolbar select { transition: border-color var(--dur-fast) ease, box-shadow var(--dur) ease; }
+
+.ticket-row, .kb-card, .webhook-card, .kpi-card, .billing-kpi, .codari-stat, .queue-meter, .billing-table tbody tr, .org-person, .kb-suggest-item {
+  transition: background-color var(--dur-fast) ease, border-color var(--dur) ease, box-shadow var(--dur) ease, transform var(--dur) var(--ease-out);
+}
+.kb-card:hover, .webhook-card:hover, .codari-stat:hover, .kpi-card:hover, .billing-kpi:hover { transform: translateY(-2px); box-shadow: var(--shadow-hover); }
+.ticket-row:hover { box-shadow: inset 3px 0 0 var(--accent); }
+
+.badge, .billing-status, .sla-pill { transition: background-color var(--dur) ease, color var(--dur) ease; }
+.nav-count:not(:empty) { animation: m-badge var(--dur-slow) var(--ease-spring) backwards; }
+
+/* Шкалы плавно меняют значение */
+.work-progress span, .meter-track span, .portfolio-segment { transition: width 600ms var(--ease-out), flex-basis 600ms var(--ease-out); }
+
+/* Появление раздела */
+.view-enter .top { animation: m-rise var(--dur-slow) var(--ease-out) backwards; }
+.view-enter .top > :last-child { animation: m-fade var(--dur-slow) 120ms ease backwards; }
+.view-enter main > :not(.top) { animation: m-rise var(--dur-slow) var(--ease-out) backwards; }
+.view-enter main > :nth-child(2) { animation-delay: 60ms; }
+.view-enter main > :nth-child(3) { animation-delay: 110ms; }
+.view-enter main > :nth-child(4) { animation-delay: 160ms; }
+.view-enter main > :nth-child(n+5) { animation-delay: 200ms; }
+
+/* Сетки карточек — каскадом */
+.view-enter .codari-stats > *, .view-enter .analytics-grid > *, .view-enter .billing-kpi-grid > *, .view-enter .kb-grid > *, .view-enter .queue-overview-bars > *, .view-enter .webhooks-list > * {
+  animation: m-pop var(--dur-slow) var(--ease-out) backwards;
+}
+.view-enter :is(.codari-stats, .analytics-grid, .billing-kpi-grid, .kb-grid, .queue-overview-bars, .webhooks-list) > :nth-child(1) { animation-delay: 120ms; }
+.view-enter :is(.codari-stats, .analytics-grid, .billing-kpi-grid, .kb-grid, .queue-overview-bars, .webhooks-list) > :nth-child(2) { animation-delay: 170ms; }
+.view-enter :is(.codari-stats, .analytics-grid, .billing-kpi-grid, .kb-grid, .queue-overview-bars, .webhooks-list) > :nth-child(3) { animation-delay: 220ms; }
+.view-enter :is(.codari-stats, .analytics-grid, .billing-kpi-grid, .kb-grid, .queue-overview-bars, .webhooks-list) > :nth-child(4) { animation-delay: 270ms; }
+.view-enter :is(.codari-stats, .analytics-grid, .billing-kpi-grid, .kb-grid, .queue-overview-bars, .webhooks-list) > :nth-child(n+5) { animation-delay: 310ms; }
+
+/* Строки списков — каскадом, первые десять */
+.view-enter .ticket-row { animation: m-rise var(--dur-slow) var(--ease-out) backwards; }
+.view-enter .ticket-row:nth-child(1) { animation-delay: 140ms; }
+.view-enter .ticket-row:nth-child(2) { animation-delay: 170ms; }
+.view-enter .ticket-row:nth-child(3) { animation-delay: 200ms; }
+.view-enter .ticket-row:nth-child(4) { animation-delay: 230ms; }
+.view-enter .ticket-row:nth-child(5) { animation-delay: 260ms; }
+.view-enter .ticket-row:nth-child(6) { animation-delay: 290ms; }
+.view-enter .ticket-row:nth-child(7) { animation-delay: 320ms; }
+.view-enter .ticket-row:nth-child(8) { animation-delay: 350ms; }
+.view-enter .ticket-row:nth-child(n+9) { animation-delay: 380ms; }
+
+/* Шкалы часов «наливаются» при открытии */
+.view-enter .work-progress span, .view-enter .meter-track span, .view-enter .portfolio-track { transform-origin: left center; animation: m-grow 700ms 200ms var(--ease-out) backwards; }
+
+/* Переписка */
+.view-enter .message { animation: m-rise var(--dur-slow) var(--ease-out) backwards; }
+.view-enter .message.mine { animation-name: m-slide-right; }
+.view-enter .message:not(.mine) { animation-name: m-slide-left; }
+.view-enter .next-step { animation: m-pop var(--dur-slow) 80ms var(--ease-spring) backwards; }
+
+/* Модальные окна и всплывающие меню */
+.billing-modal-backdrop { animation: m-fade var(--dur) ease backwards; }
+.billing-modal-card { animation: m-pop var(--dur-slow) var(--ease-spring) backwards; }
+.canned-menu { animation: m-pop var(--dur) var(--ease-out) backwards; transform-origin: bottom right; }
+.kb-suggest-box { animation: m-pop var(--dur) var(--ease-out) backwards; }
+.notice { animation: m-rise var(--dur) var(--ease-out) backwards; }
+
+/* Экран входа */
+.auth-card { animation: m-pop 520ms var(--ease-out) backwards; }
+.auth-card .form > * { animation: m-rise var(--dur-slow) var(--ease-out) backwards; }
+.auth-card .form > :nth-child(1) { animation-delay: 120ms; }
+.auth-card .form > :nth-child(2) { animation-delay: 170ms; }
+.auth-card .form > :nth-child(3) { animation-delay: 220ms; }
+.auth-card .form > :nth-child(n+4) { animation-delay: 270ms; }
+
+/* Оценка качества */
+.csat-star { transition: transform var(--dur-fast) var(--ease-spring), color var(--dur-fast) ease; }
+.csat-result { animation: m-pop var(--dur-slow) var(--ease-spring) backwards; }
+
+/* Уважение к настройке «уменьшить движение» */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 1ms !important; animation-delay: 0ms !important; transition-duration: 1ms !important; scroll-behavior: auto !important; }
+}
