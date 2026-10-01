@@ -48,6 +48,20 @@ class Flows(unittest.TestCase):
         self.staff = self.admin.post("/api/staff", json={"name":"Worker","email":"w@example.com","password":"password123"}).json()
         self.assertEqual(self.employee.post("/api/login", json={"email":"w@example.com","password":"password123"}).status_code, 200)
 
+    def test_landing_and_demo_request(self):
+        guest = TestClient(service.app)
+        page = guest.get("/landing")
+        self.assertEqual(page.status_code, 200)
+        self.assertIn("Codari", page.text)
+        self.assertEqual(guest.get("/landing.js").status_code, 200)
+        payload = {"name": "Ирина", "company": "Студия", "contact": "@irina", "team_size": "6–20", "consent": True}
+        self.assertEqual(guest.post("/api/demo-requests", json=payload).status_code, 200)
+        self.assertEqual(guest.post("/api/demo-requests", json={**payload, "consent": False}).status_code, 400)
+        self.assertEqual(guest.post("/api/demo-requests", json={**payload, "contact": ""}).status_code, 422)
+        with service.db() as conn:
+            row = conn.execute("SELECT name, contact, team_size FROM demo_requests ORDER BY id DESC").fetchone()
+        self.assertEqual(tuple(row), ("Ирина", "@irina", "6–20"))
+
     def test_staff_profile_avatar_and_customer_visibility(self):
         self.assertEqual(self.customer.get("/api/profile/me").status_code, 403)
         self.assertEqual(self.customer.patch("/api/profile/me", json={"name":"Client","job_title":"Wrong","bio":""}).status_code, 403)

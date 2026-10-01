@@ -51,6 +51,8 @@ aside { background: #fff; border-right: 1px solid var(--line); color: var(--nav-
 .brand { min-height: 0; padding: 0 10px 0; border-bottom: 0; gap: 10px; font-size: 16px; font-weight: 700; letter-spacing: -0.01em; color: var(--ink); }
 .brand-mark { width: 32px; height: 32px; border-radius: 9px; font-size: 16px; font-weight: 700; background: var(--accent); }
 .brand-dot { color: var(--accent); }
+.brand-name { display: block; line-height: 1.15; }
+.brand small { display: block; margin: 2px 0 0; font-size: 12px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--muted); }
 .nav { margin: 28px 0 16px; gap: 2px; }
 .nav button { min-height: 40px; padding: 0 12px; gap: 10px; border-radius: 9px; font-size: 14px; font-weight: 500; color: var(--nav-text); }
 .nav button:hover { background: var(--nav-hover); color: var(--ink); }

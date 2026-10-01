@@ -92,6 +92,10 @@ def db():
 def init_db():
     with db() as conn:
         conn.executescript("""
+        CREATE TABLE IF NOT EXISTS demo_requests (
+            id INTEGER PRIMARY KEY, name TEXT NOT NULL, company TEXT NOT NULL DEFAULT '',
+            contact TEXT NOT NULL, team_size TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE,
             password_hash TEXT NOT NULL, role TEXT NOT NULL CHECK(role IN ('customer','employee','admin')),
@@ -625,6 +629,14 @@ class Register(Credentials):
     name: str = Field(min_length=2, max_length=100)
 
 
+class DemoRequest(BaseModel):
+    name: str = Field(min_length=2, max_length=100)
+    company: str = Field(default="", max_length=200)
+    contact: str = Field(min_length=3, max_length=120)
+    team_size: str = Field(default="", max_length=20)
+    consent: bool
+
+
 class StaffCreate(Register):
     staff_role: Literal["employee", "manager"] = "employee"
 
@@ -959,6 +971,16 @@ def design():
     return FileResponse(ROOT / "web" / "design.css", media_type="text/css")
 
 
+@app.get("/landing")
+def landing():
+    return FileResponse(ROOT / "web" / "landing.html")
+
+
+@app.get("/landing.js")
+def landing_script():
+    return FileResponse(ROOT / "web" / "landing.js", media_type="text/javascript")
+
+
 @app.get("/theme.css")
 def theme():
     return FileResponse(ROOT / "web" / "theme.css", media_type="text/css")
@@ -1025,6 +1047,18 @@ def register(data: Register, response: Response):
     with db() as conn:
         user = create_user(conn, data.name, data.email, data.password, "customer")
         return issue_session(conn, user, response)
+
+
+@app.post("/api/demo-requests")
+def create_demo_request(data: DemoRequest):
+    if not data.consent:
+        raise HTTPException(400, "Нужно согласие на обработку персональных данных")
+    with db() as conn:
+        conn.execute(
+            "INSERT INTO demo_requests(name,company,contact,team_size,created_at) VALUES(?,?,?,?,?)",
+            (data.name.strip(), data.company.strip(), data.contact.strip(), data.team_size.strip(), now()),
+        )
+    return {"ok": True}
 
 
 @app.post("/api/login")

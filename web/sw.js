@@ -1,4 +1,4 @@
-const CACHE_NAME = 'codari-v4';
+const CACHE_NAME = 'codari-v5';
 const STATIC_ASSETS = [
   '/',
   '/style.css',
