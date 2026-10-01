@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>A · Карточка заявки</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#1a52b8}a:hover{color:#143f8f}
+</style>
+</helmet>
+<div style="width: 1440px; height: 1000px; display: grid; grid-template-columns: 240px minmax(0, 1fr); background: #f4f6f8; font-family: 'Golos Text', system-ui, sans-serif; color: #17222d; font-size: 14px; line-height: 1.45">
+<aside style="background: #ffffff; border-right: 1px solid #e3e8ec; padding: 24px 16px; display: flex; flex-direction: column; gap: 28px">
+<div style="padding: 0 10px; display: flex; align-items: center; gap: 10px">
+<div style="width: 32px; height: 32px; border-radius: 9px; background: {{accent}}; color: #ffffff; display: grid; place-items: center; font-weight: 700">К</div>
+<div style="font-weight: 700; font-size: 16px; letter-spacing: -0.01em">Кабинет заявок</div>
+</div>
+<nav style="display: flex; flex-direction: column; gap: 2px">
+<sc-for list="{{nav}}" as="n" hint-placeholder-count="7">
+<a href="#" style="{{n.style}}">{{n.label}}<span style="{{n.countStyle}}">{{n.count}}</span></a>
+</sc-for>
+</nav>
+<div style="margin-top: auto; padding: 14px 10px 0; border-top: 1px solid #e3e8ec; display: flex; align-items: center; gap: 10px">
+<div style="width: 36px; height: 36px; border-radius: 50%; background: #dbe6ee; display: grid; place-items: center; font-weight: 600; color: #34505f">ИС</div>
+<div style="display: flex; flex-direction: column"><strong style="font-size: 13px">Иван Смирнов</strong><span style="font-size: 12px; color: #5d6d7c">Сотрудник</span></div>
+</div>
+</aside>
+<main style="padding: 28px 40px; display: flex; flex-direction: column; gap: 20px; min-width: 0">
+<div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 24px">
+<div style="display: flex; flex-direction: column; gap: 6px">
+<div style="display: flex; gap: 8px; align-items: center; font-size: 13px; color: #5d6d7c"><a href="#">Заявки</a><span>/</span><span>№ 1042</span></div>
+<h1 style="margin: 0; font-size: 28px; font-weight: 700; letter-spacing: -0.02em">Интеграция с 1С: выгрузка заказов</h1>
+<div style="display: flex; gap: 10px; align-items: center; font-size: 13px; color: #5d6d7c">
+<span style="background: #e3ecfc; color: #1a4fb0; padding: 4px 10px; border-radius: 99px; font-weight: 600">В работе</span>
+<span>Интеграция</span><span>·</span><span>ООО «Северный ветер»</span><span>·</span><span>Общая для организации</span>
+</div>
+</div>
+<div style="display: flex; gap: 10px">
+<button type="button" style="min-height: 44px; padding: 0 16px; border-radius: 10px; border: 1px solid #cfd8df; background: #ffffff; font: inherit; font-weight: 600; color: #17222d">Запросить доп. часы</button>
+<button type="button" style="min-height: 44px; padding: 0 18px; border-radius: 10px; border: 0; background: {{accent}}; font: inherit; font-weight: 600; color: #ffffff">Записать время</button>
+</div>
+</div>
+
+<div style="display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 20px; min-height: 0; flex-grow: 1">
+<div style="display: flex; flex-direction: column; gap: 20px; min-width: 0">
+<section style="background: #ffffff; border: 1px solid #e3e8ec; border-radius: 14px; padding: 22px 24px; display: flex; flex-direction: column; gap: 18px">
+<div style="display: flex; justify-content: space-between; align-items: baseline">
+<h2 style="margin: 0; font-size: 16px; font-weight: 600">Часы по заявке</h2>
+<span style="font-size: 13px; color: #5d6d7c">Тариф 3 000 ₽/ч</span>
+</div>
+<div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px">
+<div style="display: flex; flex-direction: column; gap: 4px"><span style="font-size: 12px; color: #5d6d7c">Оценка v2 · одобрена</span><strong style="font-family: 'IBM Plex Mono', monospace; font-size: 22px; font-weight: 500">2:00</strong></div>
+<div style="display: flex; flex-direction: column; gap: 4px"><span style="font-size: 12px; color: #5d6d7c">Доп. часы · одобрены</span><strong style="font-family: 'IBM Plex Mono', monospace; font-size: 22px; font-weight: 500">+1:00</strong></div>
+<div style="display: flex; flex-direction: column; gap: 4px"><span style="font-size: 12px; color: #5d6d7c">Фактически</span><strong style="font-family: 'IBM Plex Mono', monospace; font-size: 22px; font-weight: 500">2:30</strong></div>
+<div style="display: flex; flex-direction: column; gap: 4px"><span style="font-size: 12px; color: #5d6d7c">Осталось в лимите</span><strong style="font-family: 'IBM Plex Mono', monospace; font-size: 22px; font-weight: 500; color: #1a4fb0">0:30</strong></div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 8px">
+<div style="height: 10px; border-radius: 99px; background: #e9eef1; display: flex; overflow: hidden">
+<div style="width: 66.6%; background: {{accent}}"></div>
+<div style="width: 16.7%; background: #8fb0ec"></div>
+</div>
+<div style="display: flex; justify-content: space-between; font-size: 12px; color: #5d6d7c"><span>Израсходовано 2 ч 30 мин из 3 ч согласованных</span><span>83%</span></div>
+</div>
+</section>
+
+<section style="background: #ffffff; border: 1px solid #e3e8ec; border-radius: 14px; display: flex; flex-direction: column; min-height: 0; flex-grow: 1">
+<div style="display: flex; gap: 4px; padding: 10px 14px 0; border-bottom: 1px solid #e3e8ec">
+<button type="button" style="min-height: 44px; padding: 0 14px; background: none; border: 0; border-bottom: 2px solid {{accent}}; font: inherit; font-weight: 600; color: #17222d">Переписка</button>
+<button type="button" style="min-height: 44px; padding: 0 14px; background: none; border: 0; border-bottom: 2px solid transparent; font: inherit; color: #5d6d7c">Учёт времени · 3</button>
+<button type="button" style="min-height: 44px; padding: 0 14px; background: none; border: 0; border-bottom: 2px solid transparent; font: inherit; color: #5d6d7c">Оценки · 2</button>
+<button type="button" style="min-height: 44px; padding: 0 14px; background: none; border: 0; border-bottom: 2px solid transparent; font: inherit; color: #5d6d7c">Заметки команды</button>
+</div>
+<div style="padding: 20px 24px; display: flex; flex-direction: column; gap: 14px; flex-grow: 1">
+<div style="align-self: flex-start; max-width: 70%; background: #f1f4f6; border-radius: 14px 14px 14px 4px; padding: 12px 14px"><div style="font-size: 12px; color: #5d6d7c; margin-bottom: 4px">Анна Петрова · вчера, 16:12</div>Выгрузка за сентябрь прошла, но заказы со скидкой приходят без суммы скидки. Можно поправить в рамках этой заявки?</div>
+<div style="align-self: center; font-size: 12px; color: #5d6d7c; background: #f7f9fa; border: 1px dashed #cfd8df; border-radius: 99px; padding: 6px 14px">Заказчик одобрил дополнительные 1:00 — «Учёт скидок в выгрузке»</div>
+<div style="align-self: flex-end; max-width: 70%; background: #e6eefc; border-radius: 14px 14px 4px 14px; padding: 12px 14px"><div style="font-size: 12px; color: #3d5a8f; margin-bottom: 4px">Вы · сегодня, 10:40</div>Скидки теперь передаются отдельной строкой. Проверьте, пожалуйста, на тестовой базе — ссылка на ветку в карточке.</div>
+</div>
+<div style="border-top: 1px solid #e3e8ec; padding: 14px 16px; display: flex; gap: 10px; align-items: flex-end">
+<label style="flex-grow: 1; display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #5d6d7c">Сообщение заказчику
+<textarea rows="2" placeholder="Напишите ответ…" style="font: inherit; font-size: 14px; border: 1px solid #cfd8df; border-radius: 10px; padding: 10px 12px; resize: none; color: #17222d"></textarea></label>
+<button type="button" style="min-height: 44px; padding: 0 18px; border-radius: 10px; border: 0; background: #17222d; color: #ffffff; font: inherit; font-weight: 600">Отправить</button>
+</div>
+</section>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 16px">
+<div style="background: #e6eefc; border: 1px solid #c4d6f7; border-radius: 14px; padding: 16px 18px; display: flex; flex-direction: column; gap: 4px">
+<span style="font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #1a4fb0">Следующий шаг</span>
+<strong style="font-size: 15px; color: #133a82">Сообщить результат и перевести в «Выполнена»</strong>
+<span style="font-size: 13px; color: #3d5a8f">Время внесено, запросов на часы нет</span>
+</div>
+<section style="background: #ffffff; border: 1px solid #e3e8ec; border-radius: 14px; padding: 18px; display: flex; flex-direction: column; gap: 14px">
+<sc-for list="{{meta}}" as="m" hint-placeholder-count="5">
+<div style="display: flex; justify-content: space-between; gap: 12px; font-size: 13px"><span style="color: #5d6d7c">{{m.k}}</span><strong style="font-weight: 600; text-align: right">{{m.v}}</strong></div>
+</sc-for>
+</section>
+<section style="background: #ffffff; border: 1px solid #e3e8ec; border-radius: 14px; padding: 18px; display: flex; flex-direction: column; gap: 12px">
+<h2 style="margin: 0; font-size: 14px; font-weight: 600">История оценок</h2>
+<div style="display: flex; justify-content: space-between; font-size: 13px"><span>v2 · 2:00 · оценка 25 мин</span><span style="color: #1a4fb0; font-weight: 600">Одобрена</span></div>
+<div style="display: flex; justify-content: space-between; font-size: 13px; color: #5d6d7c"><span>v1 · 4:00 · оценка 40 мин</span><span>Корректировка</span></div>
+</section>
+<section style="background: #ffffff; border: 1px solid #e3e8ec; border-radius: 14px; padding: 18px; display: flex; flex-direction: column; gap: 8px">
+<h2 style="margin: 0; font-size: 14px; font-weight: 600">Связи с разработкой</h2>
+<a href="#" style="font-size: 13px; font-family: 'IBM Plex Mono', monospace">feature/1c-discounts</a>
+<a href="#" style="font-size: 13px; font-family: 'IBM Plex Mono', monospace">PR #218</a>
+</section>
+</div>
+</div>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#1f5fd1","options":["#1f5fd1","#2257b8","#0f7a6e"]},"$preview":{"width":1440,"height":1000}}'>
+class Component extends DCLogic {
+renderVals() {
+const accent = this.props.accent ?? '#1f5fd1';
+const items = [['Заявки', '12', true], ['Очередь', '4'], ['Общие чаты', '2'], ['Финансы', ''], ['База знаний', ''], ['Аналитика', ''], ['Настройки', '']];
+const nav = items.map(([label, count, active]) => ({
+label, count,
+style: 'display: flex; justify-content: space-between; align-items: center; min-height: 40px; padding: 0 12px; border-radius: 9px; text-decoration: none; font-weight: ' + (active ? '600' : '500') + '; color: ' + (active ? '#17222d' : '#4a5a68') + '; background: ' + (active ? '#eef2f5' : 'transparent'),
+countStyle: count ? 'font-size: 12px; font-weight: 600; color: #4a5a68; background: #e3e8ec; border-radius: 99px; padding: 1px 8px' : 'display: none'
+}));
+const meta = [
+{ k: 'Ответственный', v: 'Иван Смирнов' },
+{ k: 'Автор', v: 'Анна Петрова' },
+{ k: 'Срок', v: '3 октября' },
+{ k: 'Создана', v: '24 сентября, 11:05' },
+{ k: 'Первый ответ', v: 'через 2 ч 14 мин' }
+];
+return { accent, nav, meta };
+}
+}
+</script>
+</body>
+</html>

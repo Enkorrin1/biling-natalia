@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Аналитика</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#1a52b8}a:hover{color:#143f8f}
+</style>
+</helmet>
+<div style="width: 1440px; height: 1000px; display: grid; grid-template-columns: 240px minmax(0, 1fr); background: #f4f6f8; font-family: 'Golos Text', system-ui, sans-serif; color: #17222d; font-size: 14px; line-height: 1.45">
+<dc-import name="Sidebar" role="manager" active="Аналитика" person="Ольга Кузнецова" person-role="Менеджер" initials="ОК" hint-size="240px,1000px"></dc-import>
+<main style="padding: 28px 40px; display: flex; flex-direction: column; gap: 20px; min-width: 0">
+<div style="display: flex; justify-content: space-between; align-items: flex-end">
+<div style="display: flex; flex-direction: column; gap: 4px"><h1 style="margin: 0; font-size: 28px; font-weight: 700; letter-spacing: -0.02em">Аналитика</h1><span style="color: #5d6d7c">Показатели считаются по текущим данным и не заменяют бухгалтерскую сверку</span></div>
+<div style="display: flex; gap: 10px">
+<div style="display: flex; gap: 4px; background: #e9eef1; border-radius: 10px; padding: 3px">
+<button type="button" style="min-height: 38px; padding: 0 14px; border: 0; border-radius: 8px; background: transparent; font: inherit; font-size: 13px; color: #4a5a68">7 дней</button>
+<button type="button" style="min-height: 38px; padding: 0 14px; border: 0; border-radius: 8px; background: #ffffff; font: inherit; font-size: 13px; font-weight: 600; color: #17222d">30 дней</button>
+<button type="button" style="min-height: 38px; padding: 0 14px; border: 0; border-radius: 8px; background: transparent; font: inherit; font-size: 13px; color: #4a5a68">Квартал</button>
+</div>
+<button type="button" style="min-height: 44px; padding: 0 16px; border-radius: 10px; border: 1px solid #cfd8df; background: #ffffff; font: inherit; font-weight: 600; color: #17222d">Экспорт CSV</button>
+</div>
+</div>
+<div style="display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px">
+<sc-for list="{{kpis}}" as="k" hint-placeholder-count="5">
+<div style="background: #ffffff; border: 1px solid #e3e8ec; border-radius: 14px; padding: 16px 18px; display: flex; flex-direction: column; gap: 4px">
+<span style="font-size: 13px; color: #5d6d7c">{{k.label}}</span>
+<strong style="font-family: 'IBM Plex Mono', monospace; font-size: 26px; font-weight: 500">{{k.value}}</strong>
+<span style="font-size: 12px; color: #5d6d7c">{{k.note}}</span>
+</div>
+</sc-for>
+</div>
+<div style="display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 20px">
+<section style="background: #ffffff; border: 1px solid #e3e8ec; border-radius: 14px; padding: 18px 22px; display: flex; flex-direction: column; gap: 14px">
+<div style="display: flex; justify-content: space-between; align-items: center"><h2 style="margin: 0; font-size: 15px; font-weight: 600">Заявки по неделям</h2>
+<div style="display: flex; gap: 14px; font-size: 12px; color: #4a5a68"><span style="display: flex; align-items: center; gap: 6px"><span style="width: 10px; height: 10px; border-radius: 3px; background: #a9c1ef"></span>Создано</span><span style="display: flex; align-items: center; gap: 6px"><span style="width: 10px; height: 10px; border-radius: 3px; background: #1f5fd1"></span>Завершено</span></div></div>
+<div style="display: flex; align-items: flex-end; gap: 24px; height: 200px; border-bottom: 1px solid #e3e8ec; padding: 0 8px">
+<sc-for list="{{weeks}}" as="w" hint-placeholder-count="5">
+<div style="flex-grow: 1; display: flex; flex-direction: column; align-items: center; gap: 6px">
+<div style="display: flex; align-items: flex-end; gap: 4px; height: 170px"><div style="{{w.a}}"></div><div style="{{w.b}}"></div></div>
+</div>
+</sc-for>
+</div>
+<div style="display: flex; gap: 24px; padding: 0 8px; font-size: 12px; color: #5d6d7c"><sc-for list="{{weeks}}" as="w" hint-placeholder-count="5"><span style="flex-grow: 1; text-align: center">{{w.label}}</span></sc-for></div>
+</section>
+<section style="background: #ffffff; border: 1px solid #e3e8ec; border-radius: 14px; padding: 18px 22px; display: flex; flex-direction: column; gap: 14px">
+<h2 style="margin: 0; font-size: 15px; font-weight: 600">Виды услуг</h2>
+<sc-for list="{{services}}" as="s" hint-placeholder-count="5">
+<div style="display: grid; grid-template-columns: 110px minmax(0, 1fr) 40px; gap: 12px; align-items: center; font-size: 13px">
+<span>{{s.label}}</span>
+<div style="height: 14px; border-radius: 4px; background: #eef2f5; overflow: hidden"><div style="{{s.bar}}"></div></div>
+<span style="font-family: 'IBM Plex Mono', monospace; text-align: right">{{s.n}}</span>
+</div>
+</sc-for>
+</section>
+</div>
+<section style="background: #ffffff; border: 1px solid #e3e8ec; border-radius: 14px; display: flex; flex-direction: column">
+<div style="padding: 14px 22px; border-bottom: 1px solid #e3e8ec"><h2 style="margin: 0; font-size: 15px; font-weight: 600">Сотрудники</h2></div>
+<div style="display: grid; grid-template-columns: minmax(0, 1fr) 120px 140px 160px 140px 120px; gap: 14px; padding: 10px 22px; font-size: 12px; color: #5d6d7c; border-bottom: 1px solid #eef1f3"><span>Сотрудник</span><span style="text-align: right">Завершено</span><span style="text-align: right">Записано часов</span><span style="text-align: right">Первый ответ, ср.</span><span style="text-align: right">В ориентире</span><span style="text-align: right">Оценка</span></div>
+<sc-for list="{{staff}}" as="p" hint-placeholder-count="4">
+<div style="display: grid; grid-template-columns: minmax(0, 1fr) 120px 140px 160px 140px 120px; gap: 14px; padding: 12px 22px; border-bottom: 1px solid #eef1f3; font-family: 'IBM Plex Mono', monospace; font-size: 13px; align-items: center">
+<span style="font-family: 'Golos Text', system-ui, sans-serif; font-size: 14px; font-weight: 600">{{p.name}}</span><span style="text-align: right">{{p.done}}</span><span style="text-align: right">{{p.hours}}</span><span style="text-align: right">{{p.resp}}</span><span style="text-align: right">{{p.sla}}</span><span style="text-align: right">{{p.rate}}</span>
+</div>
+</sc-for>
+</section>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1000}}'>
+class Component extends DCLogic {
+renderVals() {
+const kpis = [
+{ label: 'Открытые заявки', value: '14', note: '3 без ответственного' },
+{ label: 'Завершено', value: '23', note: 'за 30 дней' },
+{ label: 'Первый ответ', value: '5 ч 40 м', note: 'в среднем, ориентир 24 ч' },
+{ label: 'В ориентире', value: '91%', note: 'первый ответ и оценка' },
+{ label: 'Оценка качества', value: '4,7', note: 'по 17 отзывам' }
+];
+const wk = [['1–7 сен', 6, 4], ['8–14 сен', 8, 7], ['15–21 сен', 5, 6], ['22–28 сен', 9, 5], ['29 сен –', 4, 1]];
+const weeks = wk.map(([label, a, b]) => ({ label,
+a: 'width: 26px; border-radius: 5px 5px 0 0; background: #a9c1ef; height: ' + a * 17 + 'px',
+b: 'width: 26px; border-radius: 5px 5px 0 0; background: #1f5fd1; height: ' + b * 17 + 'px' }));
+const sv = [['Доработка', 11], ['Интеграция', 8], ['Поддержка', 9], ['Консультация', 4], ['Другое', 1]];
+const services = sv.map(([label, n]) => ({ label, n, bar: 'height: 100%; border-radius: 4px; background: #1f5fd1; width: ' + Math.round(n / 11 * 100) + '%' }));
+const staff = [
+{ name: 'Иван Смирнов', done: '9', hours: '31:20', resp: '3 ч 05 м', sla: '95%', rate: '4,8' },
+{ name: 'Сергей Орлов', done: '7', hours: '22:40', resp: '6 ч 10 м', sla: '88%', rate: '4,6' },
+{ name: 'Мария Волкова', done: '5', hours: '9:30', resp: '1 ч 20 м', sla: '100%', rate: '4,9' },
+{ name: 'Дмитрий Ким', done: '2', hours: '6:00', resp: '14 ч 30 м', sla: '67%', rate: '4,3' }
+];
+return { kpis, weeks, services, staff };
+}
+}
+</script>
+</body>
+</html>

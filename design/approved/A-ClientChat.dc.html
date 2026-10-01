@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Общий чат</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#1a52b8}a:hover{color:#143f8f}
+</style>
+</helmet>
+<div style="width: 1440px; height: 1000px; display: grid; grid-template-columns: 240px minmax(0, 1fr); background: #f4f6f8; font-family: 'Golos Text', system-ui, sans-serif; color: #17222d; font-size: 14px; line-height: 1.45">
+<dc-import name="Sidebar" role="client" active="Общий чат" person="Анна Петрова" person-role="Владелец организации" initials="АП" hint-size="240px,1000px"></dc-import>
+<main style="padding: 28px 40px; display: flex; flex-direction: column; gap: 20px; min-width: 0">
+<div style="display: flex; flex-direction: column; gap: 4px">
+<h1 style="margin: 0; font-size: 28px; font-weight: 700; letter-spacing: -0.02em">Общий чат</h1>
+<span style="color: #5d6d7c">Вопросы без оформления заявки — команда ответит здесь</span>
+</div>
+<div style="display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 20px; flex-grow: 1; min-height: 0">
+<section style="background: #ffffff; border: 1px solid #e3e8ec; border-radius: 14px; display: flex; flex-direction: column; min-height: 0">
+<div style="padding: 14px 22px; border-bottom: 1px solid #e3e8ec; display: flex; align-items: center; gap: 12px">
+<div style="width: 38px; height: 38px; border-radius: 50%; background: #dbe6ee; display: grid; place-items: center; font-weight: 600; color: #34505f">МВ</div>
+<div style="display: flex; flex-direction: column; flex-grow: 1"><strong style="font-weight: 600">Мария Волкова</strong><span style="font-size: 12px; color: #1a4fb0">отвечает в вашем чате</span></div>
+<span style="font-size: 12px; color: #5d6d7c">Обновляется автоматически</span>
+</div>
+<div style="padding: 20px 24px; display: flex; flex-direction: column; gap: 12px; flex-grow: 1">
+<div style="align-self: center; font-size: 12px; color: #5d6d7c">24 сентября</div>
+<div style="align-self: flex-end; max-width: 66%; background: #e6eefc; border-radius: 14px 14px 4px 14px; padding: 11px 14px"><div style="font-size: 12px; color: #3d5a8f; margin-bottom: 3px">Вы · 10:52</div>Можно ли настроить выгрузку заказов из сайта в 1С раз в час?</div>
+<div style="align-self: flex-start; max-width: 66%; background: #f1f4f6; border-radius: 14px 14px 14px 4px; padding: 11px 14px"><div style="font-size: 12px; color: #5d6d7c; margin-bottom: 3px">Мария Волкова · 11:05</div>Да, это отдельная работа. Оформила заявку, чтобы оценить её в часах.</div>
+<a href="Main.dc.html" style="align-self: flex-start; display: flex; align-items: center; gap: 12px; border: 1px solid #c4d6f7; background: #f2f6fe; border-radius: 12px; padding: 10px 14px; text-decoration: none; color: #17222d">
+<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#1a4fb0" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16v14H4z M8 9h8 M8 13h5"></path></svg>
+<span style="display: flex; flex-direction: column"><strong style="font-weight: 600; font-size: 13px">Создана заявка № 1042 · Интеграция с 1С</strong><span style="font-size: 12px; color: #5d6d7c">Дальнейшее обсуждение — в заявке</span></span></a>
+<div style="align-self: center; font-size: 12px; color: #5d6d7c">Сегодня</div>
+<div style="align-self: flex-end; max-width: 66%; background: #e6eefc; border-radius: 14px 14px 4px 14px; padding: 11px 14px"><div style="font-size: 12px; color: #3d5a8f; margin-bottom: 3px">Вы · 09:30</div>Подскажите, где посмотреть закрывающие документы за сентябрь?</div>
+<div style="align-self: flex-start; max-width: 66%; background: #f1f4f6; border-radius: 14px 14px 14px 4px; padding: 11px 14px"><div style="font-size: 12px; color: #5d6d7c; margin-bottom: 3px">Мария Волкова · 09:41</div>В разделе «Финансы» → «Документы». Акт АКТ-2026-007 уже там, печатная форма открывается по номеру.</div>
+</div>
+<div style="border-top: 1px solid #e3e8ec; padding: 12px 16px; display: flex; gap: 10px; align-items: center">
+<button type="button" aria-label="Прикрепить файл" style="width: 44px; height: 44px; border-radius: 10px; border: 1px solid #cfd8df; background: #ffffff; color: #4a5a68; display: grid; place-items: center"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11l-8.5 8.5a5 5 0 0 1-7-7L13 4a3.5 3.5 0 0 1 5 5l-8.5 8.5a2 2 0 0 1-3-3L14 7"></path></svg></button>
+<label style="flex-grow: 1; display: flex"><span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">Сообщение</span><input type="text" placeholder="Задайте вопрос команде…" style="flex-grow: 1; min-height: 44px; border: 1px solid #cfd8df; border-radius: 10px; padding: 0 14px; font: inherit; color: #17222d"></label>
+<button type="button" style="min-height: 44px; padding: 0 18px; border-radius: 10px; border: 0; background: #1f5fd1; color: #ffffff; font: inherit; font-weight: 600">Отправить</button>
+</div>
+</section>
+<aside style="display: flex; flex-direction: column; gap: 16px">
+<section style="background: #ffffff; border: 1px solid #e3e8ec; border-radius: 14px; padding: 18px 20px; display: flex; flex-direction: column; gap: 10px">
+<h2 style="margin: 0; font-size: 15px; font-weight: 600">Как работает чат</h2>
+<p style="margin: 0; font-size: 13px; color: #4a5a68">Спросите о чём угодно — без оценки и согласования. Если вопрос потребует отдельной работы, сотрудник оформит заявку прямо из сообщения.</p>
+<a href="A-NewTicket.dc.html" style="font-size: 13px; font-weight: 600">Или создайте заявку сами</a>
+</section>
+<section style="background: #ffffff; border: 1px solid #e3e8ec; border-radius: 14px; padding: 18px 20px; display: flex; flex-direction: column; gap: 10px">
+<h2 style="margin: 0; font-size: 15px; font-weight: 600">Заявки из этого чата</h2>
+<a href="Main.dc.html" style="display: flex; justify-content: space-between; text-decoration: none; color: #17222d; font-size: 13px; padding: 8px 0; border-top: 1px solid #eef1f3"><span>№ 1042 · Интеграция с 1С</span><span style="color: #1a4fb0; font-weight: 600">В работе</span></a>
+<a href="#" style="display: flex; justify-content: space-between; text-decoration: none; color: #17222d; font-size: 13px; padding: 8px 0; border-top: 1px solid #eef1f3"><span>№ 1036 · Шаблон счёта</span><span style="color: #4a5a68">Закрыта</span></a>
+</section>
+<section style="background: #ffffff; border: 1px solid #e3e8ec; border-radius: 14px; padding: 18px 20px; display: flex; flex-direction: column; gap: 6px">
+<h2 style="margin: 0; font-size: 15px; font-weight: 600">Пишите из мессенджера</h2>
+<span style="font-size: 13px; color: #4a5a68">Telegram подключён — ответы придут туда же</span>
+<a href="A-Profile.dc.html" style="font-size: 13px; font-weight: 600">Настроить каналы</a>
+</section>
+</aside>
+</div>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1000}}'>
+class Component extends DCLogic {
+renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

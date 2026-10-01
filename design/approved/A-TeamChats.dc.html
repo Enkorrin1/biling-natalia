@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Общие чаты</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#1a52b8}a:hover{color:#143f8f}
+</style>
+</helmet>
+<div style="width: 1440px; height: 1000px; display: grid; grid-template-columns: 240px 340px minmax(0, 1fr) 340px; background: #f4f6f8; font-family: 'Golos Text', system-ui, sans-serif; color: #17222d; font-size: 14px; line-height: 1.45">
+<dc-import name="Sidebar" role="manager" active="Общие чаты" person="Ольга Кузнецова" person-role="Менеджер" initials="ОК" hint-size="240px,1000px"></dc-import>
+<section style="background: #ffffff; border-right: 1px solid #e3e8ec; display: flex; flex-direction: column">
+<div style="padding: 24px 18px 14px; display: flex; flex-direction: column; gap: 12px">
+<h1 style="margin: 0; font-size: 22px; font-weight: 700">Общие чаты</h1>
+<label style="display: flex; align-items: center; gap: 8px; min-height: 40px; border: 1px solid #cfd8df; border-radius: 10px; padding: 0 12px; color: #5d6d7c"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14z M20 20l-4-4"></path></svg><span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">Поиск чатов</span><input type="search" placeholder="Клиент или сообщение" style="border: 0; outline: none; font: inherit; flex-grow: 1; color: #17222d"></label>
+</div>
+<sc-for list="{{chats}}" as="c" hint-placeholder-count="6">
+<a href="#" style="{{c.style}}">
+<span style="width: 40px; height: 40px; border-radius: 50%; background: #dbe6ee; display: grid; place-items: center; font-weight: 600; font-size: 13px; color: #34505f; flex-shrink: 0">{{c.ini}}</span>
+<span style="display: flex; flex-direction: column; min-width: 0; flex-grow: 1"><span style="display: flex; justify-content: space-between; gap: 8px"><strong style="font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{c.name}}</strong><span style="font-size: 12px; color: #5d6d7c">{{c.time}}</span></span><span style="font-size: 13px; color: #4a5a68; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{c.last}}</span><span style="font-size: 12px; color: #5d6d7c">{{c.owner}}</span></span>
+<span style="{{c.badge}}">{{c.unread}}</span>
+</a>
+</sc-for>
+</section>
+<section style="display: flex; flex-direction: column; min-width: 0; background: #ffffff; border-right: 1px solid #e3e8ec">
+<div style="padding: 18px 24px; border-bottom: 1px solid #e3e8ec; display: flex; justify-content: space-between; align-items: center">
+<div style="display: flex; flex-direction: column"><strong style="font-size: 16px; font-weight: 600">ИП Соколова</strong><span style="font-size: 12px; color: #5d6d7c">Елена Соколова · заказчик без организации</span></div>
+<span style="font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 6px; background: #fff1d9; color: #7a5410">ответить за 19 ч</span>
+</div>
+<div style="padding: 20px 24px; display: flex; flex-direction: column; gap: 12px; flex-grow: 1">
+<div style="align-self: flex-start; max-width: 78%; background: #f1f4f6; border-radius: 14px 14px 14px 4px; padding: 11px 14px"><div style="font-size: 12px; color: #5d6d7c; margin-bottom: 3px">Елена Соколова · вчера, 18:20</div>Подскажите по акту за август — его нужно подписывать?</div>
+<div style="align-self: flex-end; max-width: 78%; background: #e6eefc; border-radius: 14px 14px 4px 14px; padding: 11px 14px"><div style="font-size: 12px; color: #3d5a8f; margin-bottom: 3px">Мария Волкова · вчера, 18:44</div>Да, подпишите, пожалуйста, и пришлите скан сюда.</div>
+<div style="align-self: flex-start; max-width: 78%; display: flex; flex-direction: column; gap: 6px">
+<div style="background: #f1f4f6; border: 2px solid #1f5fd1; border-radius: 14px 14px 14px 4px; padding: 11px 14px"><div style="font-size: 12px; color: #5d6d7c; margin-bottom: 3px">Елена Соколова · сегодня, 08:05</div>И ещё: нужно добавить в отчёт по продажам разбивку по менеджерам. Это можно сделать?</div>
+<span style="font-size: 12px; color: #1a4fb0; font-weight: 600; padding-left: 4px">Выбрано для новой заявки</span>
+</div>
+</div>
+<div style="border-top: 1px solid #e3e8ec; padding: 12px 16px; display: flex; gap: 10px; align-items: center">
+<button type="button" style="min-height: 44px; padding: 0 12px; border-radius: 10px; border: 1px solid #cfd8df; background: #ffffff; color: #4a5a68; font: inherit; font-size: 13px">Шаблоны</button>
+<label style="flex-grow: 1; display: flex"><span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">Ответ</span><input type="text" placeholder="Ответить клиенту…" style="flex-grow: 1; min-height: 44px; border: 1px solid #cfd8df; border-radius: 10px; padding: 0 14px; font: inherit; color: #17222d"></label>
+<button type="button" style="min-height: 44px; padding: 0 18px; border-radius: 10px; border: 0; background: #17222d; color: #ffffff; font: inherit; font-weight: 600">Отправить</button>
+</div>
+</section>
+<aside style="padding: 24px 20px; display: flex; flex-direction: column; gap: 16px">
+<section style="background: #ffffff; border: 1px solid #e3e8ec; border-radius: 14px; padding: 18px; display: flex; flex-direction: column; gap: 12px">
+<h2 style="margin: 0; font-size: 15px; font-weight: 600">Заявка из сообщения</h2>
+<label style="display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600">Тема<input type="text" value="Разбивка отчёта по менеджерам" style="min-height: 42px; border: 1px solid #cfd8df; border-radius: 10px; padding: 0 12px; font: inherit; font-weight: 400; color: #17222d"></label>
+<label style="display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600">Вид услуги<select style="min-height: 42px; border: 1px solid #cfd8df; border-radius: 10px; padding: 0 10px; font: inherit; font-weight: 400; color: #17222d; background: #ffffff"><option>Доработка</option></select></label>
+<label style="display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600">Ответственный<select style="min-height: 42px; border: 1px solid #cfd8df; border-radius: 10px; padding: 0 10px; font: inherit; font-weight: 400; color: #17222d; background: #ffffff"><option>Сергей Орлов</option></select></label>
+<span style="font-size: 12px; color: #5d6d7c">Текст и вложения сообщения перейдут в заявку. Клиент получит уведомление.</span>
+<button type="button" style="min-height: 44px; border-radius: 10px; border: 0; background: #1f5fd1; color: #ffffff; font: inherit; font-weight: 600">Создать заявку</button>
+</section>
+<section style="background: #ffffff; border: 1px solid #e3e8ec; border-radius: 14px; padding: 18px; display: flex; flex-direction: column; gap: 10px">
+<h2 style="margin: 0; font-size: 15px; font-weight: 600">О чате</h2>
+<label style="display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: #5d6d7c">Ведёт чат<select style="min-height: 42px; border: 1px solid #cfd8df; border-radius: 10px; padding: 0 10px; font: inherit; color: #17222d; background: #ffffff"><option>Мария Волкова</option></select></label>
+<div style="display: flex; justify-content: space-between; font-size: 13px"><span style="color: #5d6d7c">Баланс</span><span style="font-family: 'IBM Plex Mono', monospace">2:30 ч</span></div>
+<div style="display: flex; justify-content: space-between; font-size: 13px"><span style="color: #5d6d7c">Активные заявки</span><span>1</span></div>
+</section>
+</aside>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1000}}'>
+class Component extends DCLogic {
+renderVals() {
+const data = [
+['ИП Соколова', 'ЕС', 'И ещё: нужно добавить в отчёт по продажам…', '08:05', 'Мария Волкова', '2', true],
+['ООО «Северный ветер»', 'СВ', 'Подскажите, где посмотреть закрывающие…', '09:41', 'Мария Волкова', '', false],
+['ООО «Лес и камень»', 'ЛК', 'Оплата картой снова не проходит', 'вчера', 'не назначен', '1', false],
+['ООО «Альфа-Трейд»', 'АТ', 'Спасибо, всё работает', 'вчера', 'Мария Волкова', '', false],
+['ИП Громов', 'ИГ', 'Когда будет готов отчёт?', '27 сен', 'Сергей Орлов', '', false],
+['ООО «Мера»', 'М', 'Добрый день! Есть вопрос по тарифу', '25 сен', 'Мария Волкова', '', false]
+];
+const chats = data.map(([name, ini, last, time, owner, unread, on]) => ({ name, ini, last, time, owner: 'Ведёт: ' + owner, unread,
+style: 'display: flex; gap: 12px; align-items: center; padding: 12px 18px; text-decoration: none; color: #17222d; border-left: 3px solid ' + (on ? '#1f5fd1' : 'transparent') + '; background: ' + (on ? '#f2f6fe' : '#ffffff'),
+badge: unread ? 'min-width: 22px; height: 22px; border-radius: 99px; background: #1f5fd1; color: #ffffff; font-size: 12px; font-weight: 700; display: grid; place-items: center' : 'display: none'
+}));
+return { chats };
+}
+}
+</script>
+</body>
+</html>

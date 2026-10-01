@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Финансы заказчика</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#1a52b8}a:hover{color:#143f8f}
+</style>
+</helmet>
+<div style="width: 1440px; height: 1000px; display: grid; grid-template-columns: 240px minmax(0, 1fr); background: #f4f6f8; font-family: 'Golos Text', system-ui, sans-serif; color: #17222d; font-size: 14px; line-height: 1.45">
+<dc-import name="Sidebar" role="client" active="Финансы" person="Анна Петрова" person-role="Владелец организации" initials="АП" hint-size="240px,1000px"></dc-import>
+<main style="padding: 28px 40px; display: flex; flex-direction: column; gap: 20px; min-width: 0">
+<div style="display: flex; flex-direction: column; gap: 4px">
+<h1 style="margin: 0; font-size: 28px; font-weight: 700; letter-spacing: -0.02em">Финансы</h1>
+<span style="color: #5d6d7c">ООО «Северный ветер» · тариф 3 000 ₽ за час работы</span>
+</div>
+<div style="display: grid; grid-template-columns: 1.2fr 1fr 1fr; gap: 16px">
+<div style="background: #17222d; color: #ffffff; border-radius: 16px; padding: 22px 24px; display: flex; flex-direction: column; gap: 6px">
+<span style="font-size: 13px; color: #b8c6d1">Оплаченные часы на балансе</span>
+<strong style="font-family: 'IBM Plex Mono', monospace; font-size: 40px; font-weight: 500; letter-spacing: -0.02em">7:00 ч</strong>
+<div style="height: 8px; border-radius: 99px; background: #304354; display: flex; overflow: hidden; margin-top: 6px"><div style="width: 57%; background: #5b8ef0"></div><div style="width: 43%; background: #c58b2a"></div></div>
+<span style="font-size: 12px; color: #b8c6d1">4:00 уже выполнено и спишется ближайшим актом · свободно 3:00</span>
+</div>
+<div style="background: #ffffff; border: 1px solid #e3e8ec; border-radius: 16px; padding: 22px 24px; display: flex; flex-direction: column; gap: 6px">
+<span style="font-size: 13px; color: #5d6d7c">Согласовано в активных заявках</span>
+<strong style="font-family: 'IBM Plex Mono', monospace; font-size: 28px; font-weight: 500">3:00</strong>
+<span style="font-size: 12px; color: #5d6d7c">№ 1042 и № 1047 · справочно, баланс не резервируется</span>
+</div>
+<div style="background: #ffffff; border: 2px solid #1f5fd1; border-radius: 16px; padding: 20px 22px; display: flex; flex-direction: column; gap: 8px">
+<span style="font-size: 13px; color: #1a4fb0; font-weight: 600">Счёт к оплате</span>
+<div style="display: flex; align-items: baseline; justify-content: space-between"><strong style="font-family: 'IBM Plex Mono', monospace; font-size: 28px; font-weight: 500">60 000 ₽</strong><span style="font-size: 13px; color: #5d6d7c">20 часов</span></div>
+<span style="font-size: 12px; color: #5d6d7c">СЧ-2026-019 от 28 сентября</span>
+<a href="A-Invoice.dc.html" style="align-self: flex-start; min-height: 40px; display: inline-flex; align-items: center; padding: 0 16px; border-radius: 10px; background: #1f5fd1; color: #ffffff; font-weight: 600; text-decoration: none; margin-top: 4px">Открыть счёт</a>
+</div>
+</div>
+<div style="display: grid; grid-template-columns: minmax(0, 1fr) 400px; gap: 20px; flex-grow: 1; min-height: 0">
+<section style="background: #ffffff; border: 1px solid #e3e8ec; border-radius: 14px; display: flex; flex-direction: column">
+<div style="display: flex; justify-content: space-between; align-items: center; padding: 16px 22px; border-bottom: 1px solid #e3e8ec">
+<h2 style="margin: 0; font-size: 16px; font-weight: 600">Документы</h2>
+<div style="display: flex; gap: 4px; background: #eef2f5; border-radius: 10px; padding: 3px">
+<button type="button" style="min-height: 34px; padding: 0 12px; border: 0; border-radius: 8px; background: #ffffff; font: inherit; font-size: 13px; font-weight: 600; color: #17222d">Все</button>
+<button type="button" style="min-height: 34px; padding: 0 12px; border: 0; border-radius: 8px; background: transparent; font: inherit; font-size: 13px; color: #4a5a68">Счета</button>
+<button type="button" style="min-height: 34px; padding: 0 12px; border: 0; border-radius: 8px; background: transparent; font: inherit; font-size: 13px; color: #4a5a68">Акты</button>
+</div>
+</div>
+<sc-for list="{{docs}}" as="d" hint-placeholder-count="4">
+<div style="display: grid; grid-template-columns: 44px minmax(0, 1fr) 110px 120px 44px; gap: 14px; padding: 14px 22px; align-items: center; border-bottom: 1px solid #eef1f3">
+<span style="width: 44px; height: 44px; border-radius: 10px; background: #f1f4f6; display: grid; place-items: center; color: #4a5a68"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h9l4 4v14H6z M9 12h7 M9 16h7"></path></svg></span>
+<span style="display: flex; flex-direction: column; min-width: 0"><a href="A-Invoice.dc.html" style="font-weight: 600; text-decoration: none; color: #17222d">{{d.title}}</a><span style="font-size: 12px; color: #5d6d7c">{{d.meta}}</span></span>
+<span style="font-family: 'IBM Plex Mono', monospace; text-align: right">{{d.sum}}</span>
+<span style="{{d.badge}}">{{d.status}}</span>
+<button type="button" aria-label="Открыть печатную форму" style="width: 40px; height: 40px; border: 1px solid #e3e8ec; border-radius: 10px; background: #ffffff; color: #4a5a68; display: grid; place-items: center"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 9V3h10v6 M7 18H4v-8h16v8h-3 M7 14h10v7H7z"></path></svg></button>
+</div>
+</sc-for>
+</section>
+<section style="background: #ffffff; border: 1px solid #e3e8ec; border-radius: 14px; display: flex; flex-direction: column">
+<div style="padding: 16px 22px; border-bottom: 1px solid #e3e8ec"><h2 style="margin: 0; font-size: 16px; font-weight: 600">Движение часов</h2></div>
+<sc-for list="{{ops}}" as="o" hint-placeholder-count="4">
+<div style="display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; padding: 14px 22px; border-bottom: 1px solid #eef1f3">
+<strong style="font-weight: 600">{{o.title}}</strong>
+<strong style="{{o.amountStyle}}">{{o.amount}}</strong>
+<span style="font-size: 12px; color: #5d6d7c">{{o.note}}</span>
+<span style="font-size: 12px; color: #5d6d7c; text-align: right; font-family: 'IBM Plex Mono', monospace">ост. {{o.after}}</span>
+</div>
+</sc-for>
+<p style="margin: 0; padding: 14px 22px; font-size: 12px; color: #5d6d7c">Часы пополняются после подтверждения оплаты счёта и списываются по акту — по согласованному объёму заявок.</p>
+</section>
+</div>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1000}}'>
+class Component extends DCLogic {
+renderVals() {
+const pill = (bg, fg) => 'justify-self: start; font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 99px; background: ' + bg + '; color: ' + fg;
+const docs = [
+{ title: 'Счёт СЧ-2026-019', meta: '28 сентября · пакет 20 часов, IV квартал', sum: '60 000 ₽', status: 'К оплате', badge: pill('#e4edfb', '#234f8f') },
+{ title: 'Акт АКТ-2026-007', meta: '20 сентября · заявки № 1031, 1036 · 3:00', sum: '9 000 ₽', status: 'Выставлен', badge: pill('#e4edfb', '#234f8f') },
+{ title: 'Акт АКТ-2026-005', meta: '12 сентября · заменён актом АКТ-2026-007', sum: '9 000 ₽', status: 'Отменён', badge: pill('#eef1f3', '#4a5a68') },
+{ title: 'Счёт СЧ-2026-014', meta: '2 сентября · пакет 10 часов', sum: '30 000 ₽', status: 'Оплачен', badge: pill('#dff2e3', '#22663a') }
+];
+const plus = 'font-family: \'IBM Plex Mono\', monospace; font-weight: 500; color: #22663a; text-align: right';
+const minus = 'font-family: \'IBM Plex Mono\', monospace; font-weight: 500; color: #9a3412; text-align: right';
+const ops = [
+{ title: 'Списание по акту', note: 'АКТ-2026-007 · 20 сентября', amount: '−3:00', amountStyle: minus, after: '7:00' },
+{ title: 'Возврат часов', note: 'Отмена АКТ-2026-005 · 15 сентября', amount: '+3:00', amountStyle: plus, after: '10:00' },
+{ title: 'Списание по акту', note: 'АКТ-2026-005 · 12 сентября', amount: '−3:00', amountStyle: minus, after: '7:00' },
+{ title: 'Пополнение', note: 'Оплата СЧ-2026-014 · 4 сентября', amount: '+10:00', amountStyle: plus, after: '10:00' }
+];
+return { docs, ops };
+}
+}
+</script>
+</body>
+</html>

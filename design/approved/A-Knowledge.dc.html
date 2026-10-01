@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>База знаний</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#1a52b8}a:hover{color:#143f8f}
+</style>
+</helmet>
+<div style="width: 1440px; height: 1000px; display: grid; grid-template-columns: 240px minmax(0, 1fr); background: #f4f6f8; font-family: 'Golos Text', system-ui, sans-serif; color: #17222d; font-size: 14px; line-height: 1.45">
+<dc-import name="Sidebar" role="client" active="База знаний" person="Анна Петрова" person-role="Владелец организации" initials="АП" hint-size="240px,1000px"></dc-import>
+<main style="display: flex; flex-direction: column; min-width: 0">
+<section style="background: #17222d; color: #ffffff; padding: 40px 40px 36px; display: flex; flex-direction: column; gap: 16px">
+<h1 style="margin: 0; font-size: 30px; font-weight: 700; letter-spacing: -0.02em">База знаний</h1>
+<label style="display: flex; align-items: center; gap: 10px; max-width: 680px; min-height: 52px; background: #ffffff; border-radius: 12px; padding: 0 16px; color: #4a5a68">
+<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14z M20 20l-4-4"></path></svg>
+<span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">Поиск по базе знаний</span>
+<input type="search" value="выгрузка 1С" style="border: 0; outline: none; font: inherit; font-size: 16px; flex-grow: 1; color: #17222d"></label>
+<div style="display: flex; gap: 8px; flex-wrap: wrap">
+<sc-for list="{{cats}}" as="c" hint-placeholder-count="5"><button type="button" style="{{c.style}}">{{c.label}}</button></sc-for>
+</div>
+</section>
+<div style="padding: 28px 40px; display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 20px">
+<section style="display: flex; flex-direction: column; gap: 12px">
+<span style="font-size: 13px; color: #5d6d7c">Найдено 4 статьи по запросу «выгрузка 1С»</span>
+<sc-for list="{{articles}}" as="a" hint-placeholder-count="4">
+<a href="#" style="background: #ffffff; border: 1px solid #e3e8ec; border-radius: 14px; padding: 18px 22px; display: flex; flex-direction: column; gap: 6px; text-decoration: none; color: #17222d">
+<span style="font-size: 12px; color: #1a4fb0; font-weight: 600">{{a.cat}}</span>
+<strong style="font-size: 17px; font-weight: 600">{{a.title}}</strong>
+<span style="color: #4a5a68">{{a.lead}}</span>
+<span style="font-size: 12px; color: #5d6d7c">{{a.meta}}</span>
+</a>
+</sc-for>
+</section>
+<aside style="display: flex; flex-direction: column; gap: 16px">
+<section style="background: #ffffff; border: 1px solid #e3e8ec; border-radius: 14px; padding: 20px; display: flex; flex-direction: column; gap: 10px">
+<h2 style="margin: 0; font-size: 15px; font-weight: 600">Не нашли ответ?</h2>
+<span style="font-size: 13px; color: #4a5a68">Спросите команду в общем чате или сразу оформите заявку.</span>
+<a href="A-ClientChat.dc.html" style="min-height: 44px; display: inline-flex; align-items: center; justify-content: center; border-radius: 10px; background: #1f5fd1; color: #ffffff; font-weight: 600; text-decoration: none">Написать в чат</a>
+<a href="A-NewTicket.dc.html" style="min-height: 44px; display: inline-flex; align-items: center; justify-content: center; border-radius: 10px; border: 1px solid #cfd8df; color: #17222d; font-weight: 600; text-decoration: none">Создать заявку</a>
+</section>
+<section style="background: #ffffff; border: 1px solid #e3e8ec; border-radius: 14px; padding: 20px; display: flex; flex-direction: column; gap: 10px">
+<h2 style="margin: 0; font-size: 15px; font-weight: 600">Популярное</h2>
+<a href="#" style="font-size: 13px">Как согласовать оценку в часах</a>
+<a href="#" style="font-size: 13px">Что такое баланс часов</a>
+<a href="#" style="font-size: 13px">Как подключить Telegram</a>
+<a href="#" style="font-size: 13px">Где найти акты и счета</a>
+</section>
+</aside>
+</div>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1000}}'>
+class Component extends DCLogic {
+renderVals() {
+const labels = ['Все', 'Интеграции', 'Работа с кабинетом', 'Финансы и документы', 'Мессенджеры'];
+const cats = labels.map((label, i) => ({ label, style: 'min-height: 36px; padding: 0 14px; border-radius: 99px; font: inherit; font-size: 13px; ' + (i === 1 ? 'border: 0; background: #5b8ef0; color: #0c2350; font-weight: 600' : 'border: 1px solid #3a4d5d; background: transparent; color: #e3ebf0') }));
+const articles = [
+{ cat: 'Интеграции', title: 'Как настроить расписание обмена с 1С', lead: 'Где задаётся частота выгрузки, как проверить последний обмен и что делать при ошибке.', meta: '4 мин чтения · полезно 18 читателям' },
+{ cat: 'Интеграции', title: 'Почему заказ не выгрузился', lead: 'Пять частых причин: статусы, склады, единицы измерения, права и дубли.', meta: '2 мин чтения · полезно 11 читателям' },
+{ cat: 'Интеграции', title: 'Сопоставление полей заказа', lead: 'Как поля сайта соответствуют документу 1С и какие можно добавить.', meta: '5 мин чтения' },
+{ cat: 'Работа с кабинетом', title: 'Как описать задачу на интеграцию', lead: 'Шаблон: что есть сейчас, что нужно, где проверить — чтобы оценка была точнее.', meta: '3 мин чтения' }
+];
+return { cats, articles };
+}
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Интеграции</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#1a52b8}a:hover{color:#143f8f}
+</style>
+</helmet>
+<div style="width: 1440px; height: 1000px; display: grid; grid-template-columns: 240px minmax(0, 1fr); background: #f4f6f8; font-family: 'Golos Text', system-ui, sans-serif; color: #17222d; font-size: 14px; line-height: 1.45">
+<dc-import name="Sidebar" role="admin" active="Интеграции" person="Алексей Морозов" person-role="Администратор" initials="АМ" hint-size="240px,1000px"></dc-import>
+<main style="padding: 28px 40px; display: flex; flex-direction: column; gap: 20px; min-width: 0">
+<div style="display: flex; justify-content: space-between; align-items: flex-end">
+<div style="display: flex; flex-direction: column; gap: 4px"><h1 style="margin: 0; font-size: 28px; font-weight: 700; letter-spacing: -0.02em">Интеграции</h1><span style="color: #5d6d7c">Webhook сообщает внешним системам о событиях заявок, согласований и документов</span></div>
+<button type="button" style="min-height: 44px; padding: 0 18px; border-radius: 10px; border: 0; background: #1f5fd1; color: #ffffff; font: inherit; font-weight: 600">Добавить webhook</button>
+</div>
+<div style="display: grid; grid-template-columns: minmax(0, 1fr) 460px; gap: 20px; align-items: start">
+<div style="display: flex; flex-direction: column; gap: 14px">
+<sc-for list="{{hooks}}" as="h" hint-placeholder-count="2">
+<section style="{{h.cardStyle}}">
+<div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 14px">
+<div style="display: flex; flex-direction: column; gap: 2px; min-width: 0"><strong style="font-size: 16px; font-weight: 600">{{h.name}}</strong><code style="font-family: 'IBM Plex Mono', monospace; font-size: 13px; color: #4a5a68">{{h.url}}</code></div>
+<span style="{{h.stStyle}}">{{h.st}}</span>
+</div>
+<div style="display: flex; gap: 6px; flex-wrap: wrap">
+<sc-for list="{{h.events}}" as="e" hint-placeholder-count="3"><span style="font-family: 'IBM Plex Mono', monospace; font-size: 12px; background: #eef2f5; color: #34505f; padding: 4px 8px; border-radius: 6px">{{e}}</span></sc-for>
+</div>
+<div style="display: flex; gap: 10px; align-items: center">
+<button type="button" style="min-height: 40px; padding: 0 14px; border-radius: 10px; border: 1px solid #cfd8df; background: #ffffff; font: inherit; font-weight: 600; color: #17222d">Отправить тест</button>
+<button type="button" style="min-height: 40px; padding: 0 14px; border-radius: 10px; border: 1px solid #cfd8df; background: #ffffff; font: inherit; font-weight: 600; color: #17222d">Изменить</button>
+<span style="margin-left: auto; font-size: 12px; color: #5d6d7c">{{h.last}}</span>
+</div>
+</section>
+</sc-for>
+<section style="background: #ffffff; border: 1px solid #e3e8ec; border-radius: 14px; padding: 18px 22px; display: flex; flex-direction: column; gap: 10px">
+<h2 style="margin: 0; font-size: 15px; font-weight: 600">Мессенджеры</h2>
+<div style="display: flex; justify-content: space-between; font-size: 13px"><span>Telegram-бот</span><span style="color: #22663a; font-weight: 600">Работает · очередь пуста</span></div>
+<div style="display: flex; justify-content: space-between; font-size: 13px"><span>MAX-бот</span><span style="color: #7a5410; font-weight: 600">2 сообщения ждут повтора</span></div>
+</section>
+</div>
+<section style="background: #ffffff; border: 1px solid #e3e8ec; border-radius: 14px; display: flex; flex-direction: column">
+<div style="padding: 14px 20px; border-bottom: 1px solid #e3e8ec; display: flex; justify-content: space-between; align-items: center"><h2 style="margin: 0; font-size: 15px; font-weight: 600">Журнал доставки</h2><span style="font-size: 12px; color: #5d6d7c">Учётная система</span></div>
+<sc-for list="{{log}}" as="l" hint-placeholder-count="7">
+<div style="display: grid; grid-template-columns: 52px minmax(0, 1fr) 60px; gap: 12px; padding: 11px 20px; border-bottom: 1px solid #eef1f3; align-items: center">
+<span style="{{l.codeStyle}}">{{l.code}}</span>
+<span style="display: flex; flex-direction: column; min-width: 0"><span style="font-family: 'IBM Plex Mono', monospace; font-size: 13px">{{l.event}}</span><span style="font-size: 12px; color: #5d6d7c">{{l.note}}</span></span>
+<span style="font-size: 12px; color: #5d6d7c; text-align: right">{{l.time}}</span>
+</div>
+</sc-for>
+</section>
+</div>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1000}}'>
+class Component extends DCLogic {
+renderVals() {
+const pill = (bg, fg) => 'font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 99px; white-space: nowrap; background: ' + bg + '; color: ' + fg;
+const hooks = [
+{ name: 'Учётная система', url: 'https://erp.example.ru/hooks/billing', events: ['invoice.paid', 'act.created', 'act.cancelled'], st: 'Активен', stStyle: pill('#dff2e3', '#22663a'), last: 'Последняя доставка 20 сен, 14:02 · 200', cardStyle: 'background: #ffffff; border: 1px solid #e3e8ec; border-radius: 14px; padding: 18px 22px; display: flex; flex-direction: column; gap: 14px' },
+{ name: 'Трекер разработки', url: 'https://tracker.example.ru/api/inbound', events: ['ticket.created', 'estimate.approved', 'ticket.status_changed'], st: 'Ошибки доставки', stStyle: pill('#fdecea', '#8f2a1c'), last: '3 неудачные попытки · 500', cardStyle: 'background: #ffffff; border: 1px solid #f4c7c0; border-radius: 14px; padding: 18px 22px; display: flex; flex-direction: column; gap: 14px' }
+];
+const ok = 'font-family: \'IBM Plex Mono\', monospace; font-size: 12px; font-weight: 500; text-align: center; padding: 3px 0; border-radius: 6px; background: #dff2e3; color: #22663a';
+const bad = 'font-family: \'IBM Plex Mono\', monospace; font-size: 12px; font-weight: 500; text-align: center; padding: 3px 0; border-radius: 6px; background: #fdecea; color: #8f2a1c';
+const log = [
+{ code: '200', codeStyle: ok, event: 'act.created', note: 'АКТ-2026-007 · 120 мс', time: '20 сен' },
+{ code: '200', codeStyle: ok, event: 'act.cancelled', note: 'АКТ-2026-005 · 98 мс', time: '15 сен' },
+{ code: '200', codeStyle: ok, event: 'act.created', note: 'АКТ-2026-005 · 131 мс', time: '12 сен' },
+{ code: '500', codeStyle: bad, event: 'invoice.paid', note: 'СЧ-2026-014 · повтор через очередь', time: '4 сен' },
+{ code: '200', codeStyle: ok, event: 'invoice.paid', note: 'СЧ-2026-014 · повтор 2 · 140 мс', time: '4 сен' },
+{ code: '200', codeStyle: ok, event: 'test', note: 'Тестовое событие', time: '2 сен' }
+];
+return { hooks, log };
+}
+}
+</script>
+</body>
+</html>

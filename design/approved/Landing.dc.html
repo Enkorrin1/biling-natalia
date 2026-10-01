@@ -1,0 +1,478 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Кабинет заявок — лендинг</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700;800&amp;family=IBM+Plex+Mono:wght@500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#1a52b8}a:hover{color:#143f8f}
+</style>
+</helmet>
+<div style="background: #f4f6f8; font-family: 'Golos Text', system-ui, sans-serif; color: #17222d; font-size: 16px; line-height: 1.55">
+
+<div style="background: #17222d; color: #e3ebf0; font-size: 14px">
+<div style="max-width: 1200px; margin: 0 auto; padding: 10px 24px; display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; text-align: center">
+<span style="background: #1f5fd1; color: #ffffff; font-size: 12px; font-weight: 700; border-radius: 6px; padding: 1px 8px">Новое</span>
+<span>Клиенты согласуют оценки прямо в Telegram и MAX</span>
+<a href="#messengers" style="color: #a9c4f7; font-weight: 600">Подробнее</a>
+</div>
+</div>
+
+<header style="position: sticky; top: 0; z-index: 5; background: rgba(244, 246, 248, 0.94); border-bottom: 1px solid #e3e8ec">
+<div style="max-width: 1200px; margin: 0 auto; padding: 12px 24px; display: flex; align-items: center; gap: 24px; flex-wrap: wrap">
+<a href="#top" style="display: flex; align-items: center; gap: 10px; text-decoration: none; color: #17222d"><span style="width: 34px; height: 34px; border-radius: 10px; background: #1f5fd1; color: #ffffff; display: grid; place-items: center; font-weight: 700">К</span><strong style="font-size: 17px">Кабинет заявок</strong></a>
+<nav aria-label="Разделы" style="display: flex; gap: 22px; flex-grow: 1; flex-wrap: wrap; font-size: 15px">
+<a href="#how" style="color: #4a5a68; text-decoration: none">Как работает</a>
+<a href="#features" style="color: #4a5a68; text-decoration: none">Возможности</a>
+<a href="#billing" style="color: #4a5a68; text-decoration: none">Баланс часов</a>
+<a href="#pricing" style="color: #4a5a68; text-decoration: none">Тарифы</a>
+<a href="#faq" style="color: #4a5a68; text-decoration: none">Вопросы</a>
+</nav>
+<a href="#" style="color: #17222d; text-decoration: none; font-weight: 600; font-size: 15px">[+7 000 000-00-00]</a>
+<a href="A-Login.dc.html" style="color: #17222d; font-weight: 600; text-decoration: none; min-height: 44px; display: inline-flex; align-items: center; padding: 0 8px">Войти</a>
+<a href="#demo" style="min-height: 44px; display: inline-flex; align-items: center; padding: 0 18px; border-radius: 10px; background: #1f5fd1; color: #ffffff; font-weight: 600; text-decoration: none">Запросить демо</a>
+</div>
+</header>
+
+<section id="top" style="max-width: 1200px; margin: 0 auto; padding: clamp(48px, 8vw, 96px) 24px clamp(40px, 5vw, 64px); display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 460px), 1fr)); gap: 56px; align-items: center">
+<div style="display: flex; flex-direction: column; gap: 22px">
+<span style="align-self: flex-start; font-size: 13px; font-weight: 600; color: #1a4fb0; background: #e6eefc; border-radius: 99px; padding: 6px 14px">Для IT-аутсорса, интеграторов 1С и команд поддержки</span>
+<h1 style="margin: 0; font-size: clamp(36px, 5.2vw, 60px); line-height: 1.05; font-weight: 800; letter-spacing: -0.03em">Каждый час работы — согласован, учтён и закрыт актом</h1>
+<p style="margin: 0; font-size: clamp(17px, 1.6vw, 20px); color: #4a5a68; max-width: 540px">Клиенты оставляют заявки и согласуют оценку в часах. Команда работает в пределах лимита. Счета, акты и баланс часов считаются сами.</p>
+<div style="display: flex; gap: 12px; flex-wrap: wrap">
+<a href="#demo" style="min-height: 52px; display: inline-flex; align-items: center; padding: 0 24px; border-radius: 12px; background: #1f5fd1; color: #ffffff; font-weight: 600; font-size: 17px; text-decoration: none">Запросить демо</a>
+<a href="#tour" style="min-height: 52px; display: inline-flex; align-items: center; padding: 0 22px; border-radius: 12px; border: 1px solid #cfd8df; background: #ffffff; color: #17222d; font-weight: 600; font-size: 17px; text-decoration: none">Посмотреть интерфейс</a>
+</div>
+<div style="display: flex; gap: 18px; flex-wrap: wrap; font-size: 14px; color: #4a5a68">
+<sc-for list="{{trust}}" as="t" hint-placeholder-count="4">
+<span style="display: inline-flex; align-items: center; gap: 6px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#1f5fd1" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l4 4 10-10"></path></svg>{{t}}</span>
+</sc-for>
+</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 14px">
+<div style="background: #ffffff; border: 1px solid #e3e8ec; border-radius: 18px; padding: 22px; box-shadow: 0 20px 50px rgba(23, 34, 45, 0.08); display: flex; flex-direction: column; gap: 16px">
+<div style="display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap"><span style="font-size: 13px; color: #5d6d7c">№ 1042 · Интеграция</span><span style="font-size: 12px; font-weight: 600; color: #1a4fb0; background: #e3ecfc; padding: 3px 10px; border-radius: 99px">В работе</span></div>
+<strong style="font-size: 20px; font-weight: 700; letter-spacing: -0.01em">Интеграция с 1С: выгрузка заказов</strong>
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px">
+<div style="display: flex; flex-direction: column"><span style="font-size: 12px; color: #5d6d7c">Согласовано</span><strong style="font-family: 'IBM Plex Mono', monospace; font-size: 22px; font-weight: 500">3:00</strong></div>
+<div style="display: flex; flex-direction: column"><span style="font-size: 12px; color: #5d6d7c">Фактически</span><strong style="font-family: 'IBM Plex Mono', monospace; font-size: 22px; font-weight: 500">2:30</strong></div>
+<div style="display: flex; flex-direction: column"><span style="font-size: 12px; color: #5d6d7c">Осталось</span><strong style="font-family: 'IBM Plex Mono', monospace; font-size: 22px; font-weight: 500; color: #1a4fb0">0:30</strong></div>
+</div>
+<div style="height: 10px; border-radius: 99px; background: #e9eef1; display: flex; overflow: hidden"><div style="width: 66%; background: #1f5fd1"></div><div style="width: 17%; background: #8fb0ec"></div></div>
+</div>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 14px">
+<div style="background: #ffffff; border: 2px solid #1f5fd1; border-radius: 16px; padding: 18px; display: flex; flex-direction: column; gap: 10px">
+<span style="font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #1a4fb0">Оценка · 4:00</span>
+<span style="font-size: 14px; color: #4a5a68">≈ 12 000 ₽ по тарифу</span>
+<div style="display: flex; gap: 8px"><span style="flex-grow: 1; text-align: center; padding: 8px 0; border-radius: 9px; background: #1f5fd1; color: #ffffff; font-size: 14px; font-weight: 600">Одобрить</span><span style="flex-grow: 1; text-align: center; padding: 8px 0; border-radius: 9px; border: 1px solid #cfd8df; font-size: 14px; font-weight: 600">Уточнить</span></div>
+</div>
+<div style="background: #17222d; color: #ffffff; border-radius: 16px; padding: 18px; display: flex; flex-direction: column; gap: 4px">
+<span style="font-size: 13px; color: #b8c6d1">Баланс часов</span>
+<strong style="font-family: 'IBM Plex Mono', monospace; font-size: 32px; font-weight: 500">7:00</strong>
+<span style="font-size: 13px; color: #b8c6d1">после акта АКТ-2026-007</span>
+</div>
+</div>
+</div>
+</section>
+
+<section aria-label="Для кого" style="max-width: 1200px; margin: 0 auto; padding: 0 24px clamp(40px, 6vw, 72px)">
+<div style="border-top: 1px solid #dfe5ea; padding-top: 24px; display: flex; gap: 12px 28px; flex-wrap: wrap; align-items: center; justify-content: center; color: #4a5a68; font-size: 15px">
+<span style="font-size: 13px; color: #5d6d7c">Подходит командам, которые продают время:</span>
+<sc-for list="{{segments}}" as="s" hint-placeholder-count="5"><strong style="font-weight: 600; color: #34434f">{{s}}</strong></sc-for>
+</div>
+</section>
+
+<section style="background: #ffffff; border-top: 1px solid #e3e8ec; border-bottom: 1px solid #e3e8ec">
+<div style="max-width: 1200px; margin: 0 auto; padding: clamp(48px, 7vw, 88px) 24px; display: flex; flex-direction: column; gap: 32px">
+<h2 style="margin: 0; font-size: clamp(28px, 3.4vw, 40px); font-weight: 700; letter-spacing: -0.02em; max-width: 720px">Знакомо? Тогда кабинет решит это за вас</h2>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 20px">
+<sc-for list="{{pains}}" as="p" hint-placeholder-count="3">
+<div style="border: 1px solid #e3e8ec; border-radius: 16px; padding: 24px; display: flex; flex-direction: column; gap: 14px">
+<span style="font-size: 18px; font-weight: 600; color: #4a5a68">«{{p.pain}}»</span>
+<span style="height: 1px; background: #e3e8ec"></span>
+<span style="display: flex; gap: 10px"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#1f5fd1" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink: 0; margin-top: 2px"><path d="M5 12l4 4 10-10"></path></svg><span>{{p.fix}}</span></span>
+</div>
+</sc-for>
+</div>
+</div>
+</section>
+
+<section id="how" style="max-width: 1200px; margin: 0 auto; padding: clamp(56px, 8vw, 104px) 24px; display: flex; flex-direction: column; gap: 36px">
+<div style="display: flex; flex-direction: column; gap: 10px; max-width: 720px">
+<span style="font-size: 14px; font-weight: 600; color: #1a4fb0">Как это работает</span>
+<h2 style="margin: 0; font-size: clamp(28px, 3.4vw, 40px); font-weight: 700; letter-spacing: -0.02em">От обращения до акта — четыре понятных шага</h2>
+</div>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 20px">
+<sc-for list="{{steps}}" as="s" hint-placeholder-count="4">
+<div style="background: #ffffff; border: 1px solid #e3e8ec; border-radius: 16px; padding: 24px; display: flex; flex-direction: column; gap: 12px">
+<span style="font-family: 'IBM Plex Mono', monospace; font-size: 14px; color: #1a4fb0; font-weight: 500">{{s.n}}</span>
+<strong style="font-size: 20px; font-weight: 700">{{s.t}}</strong>
+<span style="color: #4a5a68">{{s.d}}</span>
+</div>
+</sc-for>
+</div>
+</section>
+
+<section id="tour" style="background: #ffffff; border-top: 1px solid #e3e8ec; border-bottom: 1px solid #e3e8ec">
+<div style="max-width: 1200px; margin: 0 auto; padding: clamp(56px, 8vw, 104px) 24px; display: flex; flex-direction: column; gap: 28px">
+<div style="display: flex; justify-content: space-between; align-items: flex-end; gap: 20px; flex-wrap: wrap">
+<div style="display: flex; flex-direction: column; gap: 10px; max-width: 640px">
+<span style="font-size: 14px; font-weight: 600; color: #1a4fb0">Интерфейс</span>
+<h2 style="margin: 0; font-size: clamp(28px, 3.4vw, 40px); font-weight: 700; letter-spacing: -0.02em">Один кабинет — три точки зрения</h2>
+</div>
+<div role="tablist" aria-label="Кабинет" style="display: flex; gap: 4px; background: #eef2f5; border-radius: 12px; padding: 4px; flex-wrap: wrap">
+<sc-for list="{{tabs}}" as="t" hint-placeholder-count="3"><button type="button" role="tab" aria-selected="{{t.on}}" onClick="{{t.pick}}" style="{{t.style}}">{{t.label}}</button></sc-for>
+</div>
+</div>
+<div style="background: #f4f6f8; border: 1px solid #e3e8ec; border-radius: 20px; padding: clamp(14px, 2.5vw, 28px)">
+<div style="background: #ffffff; border: 1px solid #e3e8ec; border-radius: 14px; overflow: hidden; box-shadow: 0 16px 40px rgba(23, 34, 45, 0.07)">
+<div style="display: flex; gap: 6px; padding: 10px 14px; border-bottom: 1px solid #eef1f3; background: #fafbfc"><span style="width: 10px; height: 10px; border-radius: 50%; background: #dfe5ea"></span><span style="width: 10px; height: 10px; border-radius: 50%; background: #dfe5ea"></span><span style="width: 10px; height: 10px; border-radius: 50%; background: #dfe5ea"></span></div>
+<div style="padding: clamp(16px, 3vw, 28px); display: flex; flex-direction: column; gap: 16px">
+<div style="display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap"><strong style="font-size: 20px; font-weight: 700">{{tour.title}}</strong><span style="font-size: 13px; font-weight: 600; color: #1a4fb0; background: #e6eefc; border-radius: 99px; padding: 4px 12px">{{tour.badge}}</span></div>
+<sc-for list="{{tour.rows}}" as="r" hint-placeholder-count="4">
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); gap: 6px 16px; padding: 14px 16px; border: 1px solid #eef1f3; border-radius: 12px; align-items: center">
+<span style="display: flex; flex-direction: column"><strong style="font-weight: 600">{{r.a}}</strong><span style="font-size: 13px; color: #5d6d7c">{{r.b}}</span></span>
+<span style="{{r.cStyle}}">{{r.c}}</span>
+</div>
+</sc-for>
+</div>
+</div>
+</div>
+<p style="margin: 0; color: #4a5a68; max-width: 760px">{{tour.note}}</p>
+</div>
+</section>
+
+<section id="features" style="max-width: 1200px; margin: 0 auto; padding: clamp(56px, 8vw, 104px) 24px; display: flex; flex-direction: column; gap: 36px">
+<div style="display: flex; flex-direction: column; gap: 10px; max-width: 720px">
+<span style="font-size: 14px; font-weight: 600; color: #1a4fb0">Возможности</span>
+<h2 style="margin: 0; font-size: clamp(28px, 3.4vw, 40px); font-weight: 700; letter-spacing: -0.02em">Всё, что нужно сервисной команде, в одном месте</h2>
+</div>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 20px">
+<sc-for list="{{features}}" as="f" hint-placeholder-count="6">
+<div style="background: #ffffff; border: 1px solid #e3e8ec; border-radius: 16px; padding: 24px; display: flex; flex-direction: column; gap: 12px">
+<span style="width: 48px; height: 48px; border-radius: 12px; background: #e6eefc; color: #1a4fb0; display: grid; place-items: center"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{f.icon}}"></path></svg></span>
+<strong style="font-size: 19px; font-weight: 700">{{f.t}}</strong>
+<span style="color: #4a5a68">{{f.d}}</span>
+</div>
+</sc-for>
+</div>
+</section>
+
+<section id="billing" style="background: #17222d; color: #ffffff">
+<div style="max-width: 1200px; margin: 0 auto; padding: clamp(56px, 8vw, 104px) 24px; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 48px; align-items: center">
+<div style="display: flex; flex-direction: column; gap: 18px">
+<span style="font-size: 14px; font-weight: 600; color: #a9c4f7">Баланс часов</span>
+<h2 style="margin: 0; font-size: clamp(28px, 3.4vw, 42px); font-weight: 700; letter-spacing: -0.02em">Клиент платит за пакет часов и всегда видит остаток</h2>
+<p style="margin: 0; color: #c3d0d9; font-size: 18px">Оплата счёта пополняет баланс. Акт списывает только согласованные часы — ровно то, что клиент одобрил. Ошиблись в акте — отмените его, и часы вернутся.</p>
+<ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; color: #e3ebf0">
+<li style="display: flex; gap: 10px"><span style="color: #5b8ef0">—</span>Счета и акты с номерами и печатной формой</li>
+<li style="display: flex; gap: 10px"><span style="color: #5b8ef0">—</span>Индивидуальный тариф для каждого клиента</li>
+<li style="display: flex; gap: 10px"><span style="color: #5b8ef0">—</span>История операций: пополнения, списания, корректировки</li>
+</ul>
+</div>
+<div style="background: #213040; border: 1px solid #304354; border-radius: 20px; padding: 26px; display: flex; flex-direction: column">
+<span style="font-size: 13px; color: #9fb0bd; margin-bottom: 12px">Пример при тарифе 3 000 ₽/ч</span>
+<sc-for list="{{ledger}}" as="l" hint-placeholder-count="4">
+<div style="display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 16px; padding: 14px 0; border-top: 1px solid #304354; align-items: baseline">
+<span style="display: flex; flex-direction: column"><strong style="font-weight: 600">{{l.t}}</strong><span style="font-size: 14px; color: #9fb0bd">{{l.d}}</span></span>
+<span style="{{l.style}}">{{l.delta}}</span>
+<span style="font-family: 'IBM Plex Mono', monospace; color: #ffffff; min-width: 56px; text-align: right">{{l.bal}}</span>
+</div>
+</sc-for>
+</div>
+</div>
+</section>
+
+<section style="max-width: 1200px; margin: 0 auto; padding: clamp(56px, 8vw, 104px) 24px; display: flex; flex-direction: column; gap: 36px">
+<h2 style="margin: 0; font-size: clamp(28px, 3.4vw, 40px); font-weight: 700; letter-spacing: -0.02em; max-width: 720px">Удобно каждому участнику</h2>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 20px">
+<sc-for list="{{roles}}" as="r" hint-placeholder-count="3">
+<div style="background: #ffffff; border: 1px solid #e3e8ec; border-radius: 16px; padding: 26px; display: flex; flex-direction: column; gap: 14px">
+<strong style="font-size: 22px; font-weight: 700">{{r.t}}</strong>
+<sc-for list="{{r.items}}" as="i" hint-placeholder-count="4">
+<span style="display: flex; gap: 10px; color: #34434f"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#1f5fd1" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink: 0; margin-top: 3px"><path d="M5 12l4 4 10-10"></path></svg>{{i}}</span>
+</sc-for>
+</div>
+</sc-for>
+</div>
+</section>
+
+<section id="messengers" style="background: #ffffff; border-top: 1px solid #e3e8ec; border-bottom: 1px solid #e3e8ec">
+<div style="max-width: 1200px; margin: 0 auto; padding: clamp(56px, 8vw, 96px) 24px; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 48px; align-items: center">
+<div style="display: flex; flex-direction: column; gap: 16px">
+<span style="font-size: 14px; font-weight: 600; color: #1a4fb0">Telegram и MAX</span>
+<h2 style="margin: 0; font-size: clamp(28px, 3.4vw, 40px); font-weight: 700; letter-spacing: -0.02em">Клиент согласует оценку, не открывая сайт</h2>
+<p style="margin: 0; color: #4a5a68; font-size: 18px">Бот проведёт по шагам: тема, описание, проверка, отправка. Ответы, оценки и решения — те же, что в кабинете. Команда получает уведомления со ссылками на заявку.</p>
+<div style="display: flex; gap: 10px; flex-wrap: wrap">
+<span style="display: inline-flex; align-items: center; gap: 8px; border: 1px solid #e3e8ec; border-radius: 10px; padding: 8px 14px; font-weight: 600"><span style="width: 24px; height: 24px; border-radius: 6px; background: #e4f1fb; color: #1f6aa5; display: grid; place-items: center; font-size: 10px; font-weight: 800">TG</span>Telegram</span>
+<span style="display: inline-flex; align-items: center; gap: 8px; border: 1px solid #e3e8ec; border-radius: 10px; padding: 8px 14px; font-weight: 600"><span style="width: 24px; height: 24px; border-radius: 6px; background: #ece6fb; color: #5236a8; display: grid; place-items: center; font-size: 9px; font-weight: 800">MAX</span>MAX</span>
+</div>
+</div>
+<div style="background: #eef2f5; border-radius: 22px; padding: 22px; display: flex; flex-direction: column; gap: 10px; max-width: 440px; width: 100%; justify-self: center; box-sizing: border-box">
+<div style="align-self: flex-start; max-width: 85%; background: #ffffff; border-radius: 16px 16px 16px 4px; padding: 12px 14px; font-size: 15px">Оценка по заявке № 1045: <strong>4:00</strong> (≈ 12 000 ₽). Пояснение исполнителя — в кабинете.</div>
+<div style="align-self: flex-start; display: flex; gap: 8px; flex-wrap: wrap">
+<span style="background: #ffffff; border: 1px solid #c4d6f7; color: #1a4fb0; border-radius: 10px; padding: 8px 14px; font-size: 14px; font-weight: 600">Одобрить</span>
+<span style="background: #ffffff; border: 1px solid #cfd8df; border-radius: 10px; padding: 8px 14px; font-size: 14px; font-weight: 600">Корректировка</span>
+<span style="background: #ffffff; border: 1px solid #cfd8df; border-radius: 10px; padding: 8px 14px; font-size: 14px; font-weight: 600">Отклонить</span>
+</div>
+<div style="align-self: flex-end; max-width: 85%; background: #1f5fd1; color: #ffffff; border-radius: 16px 16px 4px 16px; padding: 12px 14px; font-size: 15px">Одобрить</div>
+<div style="align-self: flex-start; max-width: 85%; background: #ffffff; border-radius: 16px 16px 16px 4px; padding: 12px 14px; font-size: 15px">Готово. Исполнитель начнёт работу и сообщит о результате.</div>
+</div>
+</div>
+</section>
+
+<section style="max-width: 1200px; margin: 0 auto; padding: clamp(56px, 8vw, 104px) 24px; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 48px">
+<div style="display: flex; flex-direction: column; gap: 16px">
+<span style="font-size: 14px; font-weight: 600; color: #1a4fb0">Безопасность и контроль</span>
+<h2 style="margin: 0; font-size: clamp(28px, 3.4vw, 40px); font-weight: 700; letter-spacing: -0.02em">Данные клиентов остаются под вашим контролем</h2>
+<p style="margin: 0; color: #4a5a68; font-size: 18px">Кабинет разворачивается на вашем сервере. Каждый видит только то, что ему положено по роли, а любое действие остаётся в истории.</p>
+</div>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 16px">
+<sc-for list="{{security}}" as="s" hint-placeholder-count="4">
+<div style="background: #ffffff; border: 1px solid #e3e8ec; border-radius: 16px; padding: 20px; display: flex; flex-direction: column; gap: 8px">
+<span style="width: 40px; height: 40px; border-radius: 10px; background: #e6eefc; color: #1a4fb0; display: grid; place-items: center"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{s.icon}}"></path></svg></span>
+<strong style="font-weight: 700">{{s.t}}</strong>
+<span style="font-size: 15px; color: #4a5a68">{{s.d}}</span>
+</div>
+</sc-for>
+</div>
+</section>
+
+<section aria-label="Интеграции" style="background: #ffffff; border-top: 1px solid #e3e8ec; border-bottom: 1px solid #e3e8ec">
+<div style="max-width: 1200px; margin: 0 auto; padding: 40px 24px; display: flex; gap: 16px 28px; flex-wrap: wrap; align-items: center; justify-content: space-between">
+<strong style="font-size: 18px; font-weight: 700">Связывается с тем, чем вы уже пользуетесь</strong>
+<div style="display: flex; gap: 10px; flex-wrap: wrap">
+<sc-for list="{{integrations}}" as="g" hint-placeholder-count="5"><span style="border: 1px solid #e3e8ec; border-radius: 99px; padding: 8px 16px; font-size: 15px; font-weight: 600; color: #34434f; background: #f9fbfc">{{g}}</span></sc-for>
+</div>
+</div>
+</section>
+
+<section id="pricing" style="max-width: 1200px; margin: 0 auto; padding: clamp(56px, 8vw, 104px) 24px; display: flex; flex-direction: column; gap: 36px">
+<div style="display: flex; flex-direction: column; gap: 10px; max-width: 720px">
+<span style="font-size: 14px; font-weight: 600; color: #1a4fb0">Тарифы</span>
+<h2 style="margin: 0; font-size: clamp(28px, 3.4vw, 40px); font-weight: 700; letter-spacing: -0.02em">Подберём формат под размер команды</h2>
+</div>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 20px; align-items: stretch">
+<sc-for list="{{plans}}" as="p" hint-placeholder-count="3">
+<div style="{{p.card}}">
+<div style="display: flex; justify-content: space-between; align-items: center; gap: 10px"><strong style="font-size: 20px; font-weight: 700">{{p.name}}</strong><span style="{{p.tagStyle}}">{{p.tag}}</span></div>
+<span style="color: #4a5a68">{{p.who}}</span>
+<div style="display: flex; align-items: baseline; gap: 6px"><strong style="font-size: 32px; font-weight: 800; letter-spacing: -0.02em">{{p.price}}</strong><span style="color: #5d6d7c">{{p.per}}</span></div>
+<span style="height: 1px; background: #e3e8ec"></span>
+<sc-for list="{{p.items}}" as="i" hint-placeholder-count="4">
+<span style="display: flex; gap: 10px; font-size: 15px; color: #34434f"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#1f5fd1" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink: 0; margin-top: 3px"><path d="M5 12l4 4 10-10"></path></svg>{{i}}</span>
+</sc-for>
+<a href="#demo" style="{{p.btn}}">{{p.cta}}</a>
+</div>
+</sc-for>
+</div>
+</section>
+
+<section style="background: #ffffff; border-top: 1px solid #e3e8ec; border-bottom: 1px solid #e3e8ec">
+<div style="max-width: 1200px; margin: 0 auto; padding: clamp(56px, 8vw, 96px) 24px; display: flex; flex-direction: column; gap: 32px">
+<h2 style="margin: 0; font-size: clamp(28px, 3.4vw, 40px); font-weight: 700; letter-spacing: -0.02em">Запуск без долгого внедрения</h2>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 20px">
+<sc-for list="{{launch}}" as="l" hint-placeholder-count="3">
+<div style="display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 14px">
+<span style="width: 44px; height: 44px; border-radius: 50%; background: #1f5fd1; color: #ffffff; display: grid; place-items: center; font-weight: 700">{{l.n}}</span>
+<span style="display: flex; flex-direction: column; gap: 4px"><strong style="font-size: 18px; font-weight: 700">{{l.t}}</strong><span style="color: #4a5a68">{{l.d}}</span></span>
+</div>
+</sc-for>
+</div>
+</div>
+</section>
+
+<section id="demo" style="max-width: 1200px; margin: 0 auto; padding: clamp(56px, 8vw, 104px) 24px">
+<div style="background: #1f5fd1; color: #ffffff; border-radius: 24px; padding: clamp(28px, 5vw, 56px); display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr)); gap: 40px; align-items: center">
+<div style="display: flex; flex-direction: column; gap: 16px">
+<h2 style="margin: 0; font-size: clamp(28px, 3.4vw, 42px); font-weight: 700; letter-spacing: -0.02em">Покажем кабинет на ваших задачах</h2>
+<p style="margin: 0; font-size: 18px; color: #dce7fb">Разберём ваш процесс: как сейчас принимаете заявки, согласуете часы и выставляете акты — и настроим демо под него.</p>
+<ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; color: #ffffff">
+<li style="display: flex; gap: 10px">— Ответим в течение рабочего дня</li>
+<li style="display: flex; gap: 10px">— Демо в браузере, ничего не нужно устанавливать</li>
+<li style="display: flex; gap: 10px">— Покажем и кабинет клиента, и рабочее место команды</li>
+</ul>
+</div>
+<form style="background: #ffffff; color: #17222d; border-radius: 18px; padding: 24px; display: flex; flex-direction: column; gap: 14px">
+<label style="display: flex; flex-direction: column; gap: 6px; font-size: 14px; font-weight: 600">Имя<input type="text" autocomplete="name" style="min-height: 48px; border: 1px solid #cfd8df; border-radius: 10px; padding: 0 14px; font: inherit; font-weight: 400"></label>
+<label style="display: flex; flex-direction: column; gap: 6px; font-size: 14px; font-weight: 600">Компания<input type="text" autocomplete="organization" style="min-height: 48px; border: 1px solid #cfd8df; border-radius: 10px; padding: 0 14px; font: inherit; font-weight: 400"></label>
+<label style="display: flex; flex-direction: column; gap: 6px; font-size: 14px; font-weight: 600">Телефон или Telegram<input type="text" style="min-height: 48px; border: 1px solid #cfd8df; border-radius: 10px; padding: 0 14px; font: inherit; font-weight: 400"></label>
+<label style="display: flex; flex-direction: column; gap: 6px; font-size: 14px; font-weight: 600">Сколько человек в команде
+<select style="min-height: 48px; border: 1px solid #cfd8df; border-radius: 10px; padding: 0 12px; font: inherit; font-weight: 400; background: #ffffff; color: #17222d"><option>До 5</option><option>6–20</option><option>Больше 20</option></select></label>
+<label style="display: flex; gap: 10px; align-items: flex-start; font-size: 13px; color: #4a5a68"><input type="checkbox" style="width: 18px; height: 18px; margin-top: 2px; accent-color: #1f5fd1; flex-shrink: 0">Согласен на обработку персональных данных в соответствии с <a href="#">политикой конфиденциальности</a></label>
+<button type="submit" style="min-height: 52px; border: 0; border-radius: 12px; background: #17222d; color: #ffffff; font: inherit; font-weight: 600; font-size: 17px">Запросить демо</button>
+</form>
+</div>
+</section>
+
+<section id="faq" style="max-width: 860px; margin: 0 auto; padding: 0 24px clamp(56px, 8vw, 104px); display: flex; flex-direction: column; gap: 24px">
+<h2 style="margin: 0; font-size: clamp(28px, 3.4vw, 40px); font-weight: 700; letter-spacing: -0.02em">Частые вопросы</h2>
+<div style="display: flex; flex-direction: column; gap: 10px">
+<sc-for list="{{faq}}" as="q" hint-placeholder-count="7">
+<details style="background: #ffffff; border: 1px solid #e3e8ec; border-radius: 14px; padding: 0 22px">
+<summary style="min-height: 60px; display: flex; align-items: center; font-size: 18px; font-weight: 600; cursor: pointer">{{q.q}}</summary>
+<p style="margin: 0 0 20px; color: #4a5a68">{{q.a}}</p>
+</details>
+</sc-for>
+</div>
+<p style="margin: 0; color: #4a5a68">Не нашли ответ? <a href="#demo" style="font-weight: 600">Задайте вопрос</a> — ответим лично.</p>
+</section>
+
+<footer style="background: #17222d; color: #c3d0d9; font-size: 15px">
+<div style="max-width: 1200px; margin: 0 auto; padding: 56px 24px 32px; display: flex; flex-direction: column; gap: 40px">
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr)); gap: 32px">
+<div style="display: flex; flex-direction: column; gap: 14px; grid-column: span 1">
+<span style="display: flex; align-items: center; gap: 10px; color: #ffffff"><span style="width: 34px; height: 34px; border-radius: 10px; background: #1f5fd1; display: grid; place-items: center; font-weight: 700">К</span><strong style="font-size: 17px">Кабинет заявок</strong></span>
+<span style="font-size: 14px; color: #9fb0bd">Заявки, согласование часов, счета и акты для сервисных команд.</span>
+<div style="display: flex; gap: 8px">
+<a href="#" aria-label="Telegram-канал" style="width: 44px; height: 44px; border-radius: 10px; background: #213040; color: #ffffff; display: grid; place-items: center; text-decoration: none; font-size: 12px; font-weight: 800">TG</a>
+<a href="#" aria-label="Канал в MAX" style="width: 44px; height: 44px; border-radius: 10px; background: #213040; color: #ffffff; display: grid; place-items: center; text-decoration: none; font-size: 11px; font-weight: 800">MAX</a>
+<a href="#" aria-label="ВКонтакте" style="width: 44px; height: 44px; border-radius: 10px; background: #213040; color: #ffffff; display: grid; place-items: center; text-decoration: none; font-size: 12px; font-weight: 800">VK</a>
+</div>
+</div>
+<sc-for list="{{footer}}" as="c" hint-placeholder-count="3">
+<nav aria-label="{{c.title}}" style="display: flex; flex-direction: column; gap: 10px">
+<strong style="color: #ffffff; font-size: 14px; font-weight: 600">{{c.title}}</strong>
+<sc-for list="{{c.links}}" as="l" hint-placeholder-count="4"><a href="{{l.href}}" style="color: #c3d0d9; text-decoration: none">{{l.label}}</a></sc-for>
+</nav>
+</sc-for>
+<div style="display: flex; flex-direction: column; gap: 10px">
+<strong style="color: #ffffff; font-size: 14px; font-weight: 600">Контакты</strong>
+<a href="#" style="color: #ffffff; text-decoration: none; font-weight: 600; font-size: 17px">[+7 000 000-00-00]</a>
+<a href="#" style="color: #c3d0d9; text-decoration: none">[sales@домен.ru]</a>
+<span style="color: #9fb0bd; font-size: 14px">[Город, адрес офиса]</span>
+<span style="color: #9fb0bd; font-size: 14px">Пн–Пт, [10:00–19:00]</span>
+</div>
+</div>
+<div style="border-top: 1px solid #304354; padding-top: 24px; display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; font-size: 13px; color: #9fb0bd">
+<span>© 2026 [Наименование юрлица] · ИНН [0000000000] · ОГРН [0000000000000]</span>
+<span style="display: flex; gap: 20px; flex-wrap: wrap">
+<a href="#" style="color: #c3d0d9">Политика конфиденциальности</a>
+<a href="#" style="color: #c3d0d9">Согласие на обработку данных</a>
+<a href="#" style="color: #c3d0d9">Пользовательское соглашение</a>
+</span>
+</div>
+</div>
+</footer>
+
+<sc-if value="{{showCookies}}" hint-placeholder-val="{{true}}">
+<div role="region" aria-label="Уведомление о cookie" style="position: fixed; left: 16px; bottom: 16px; z-index: 10; max-width: 380px; background: #ffffff; border: 1px solid #e3e8ec; border-radius: 14px; padding: 16px 18px; box-shadow: 0 12px 32px rgba(23, 34, 45, 0.16); display: flex; flex-direction: column; gap: 12px; font-size: 14px; color: #34434f">
+<span>Мы используем cookie, чтобы сайт работал корректно. Подробнее — в <a href="#">политике конфиденциальности</a>.</span>
+<div style="display: flex; gap: 8px">
+<button type="button" onClick="{{hideCookies}}" style="min-height: 44px; padding: 0 18px; border-radius: 10px; border: 0; background: #1f5fd1; color: #ffffff; font: inherit; font-weight: 600">Понятно</button>
+<button type="button" onClick="{{hideCookies}}" style="min-height: 44px; padding: 0 14px; border-radius: 10px; border: 1px solid #cfd8df; background: #ffffff; color: #17222d; font: inherit; font-weight: 600">Только необходимые</button>
+</div>
+</div>
+</sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":8600}}'>
+class Component extends DCLogic {
+renderVals() {
+const tab = (this.state && this.state.tab) || 'client';
+const blue = 'font-size: 13px; font-weight: 600; color: #1a4fb0';
+const amber = 'font-size: 13px; font-weight: 600; color: #7a5410';
+const grey = 'font-size: 13px; color: #5d6d7c';
+const tours = {
+client: { title: 'Мои заявки', badge: 'Кабинет заказчика', note: 'Заказчик видит, где нужно его решение, сколько часов израсходовано и что будет дальше по каждой заявке.', rows: [
+{ a: '№ 1045 · Отчёт по остаткам', b: 'Доработка · общая для организации', c: 'Решите по оценке 4:00', cStyle: amber },
+{ a: '№ 1042 · Интеграция с 1С', b: '2:30 из 3:00 согласованных', c: 'Исполнитель готовит результат', cStyle: grey },
+{ a: '№ 1048 · Консультация по обмену', b: 'Выполнена 30 сентября', c: 'Проверьте результат', cStyle: blue },
+{ a: 'Баланс организации', b: 'Оплаченные часы', c: '7:00 ч', cStyle: blue } ] },
+team: { title: 'Очередь', badge: 'Рабочее место команды', note: 'Менеджер видит всё, что требует действия, распределяет обращения и следит за ориентирами по срокам.', rows: [
+{ a: '№ 1050 · Ошибка при оплате картой', b: 'Без ответственного · 26 ч назад', c: 'Ориентир просрочен на 2 ч', cStyle: 'font-size: 13px; font-weight: 600; color: #8f2a1c' },
+{ a: 'Чат · ИП Соколова', b: 'Новое сообщение 5 ч назад', c: 'Ответить в чате', cStyle: blue },
+{ a: '№ 1049 · Уведомления в Telegram', b: 'Ведёт Сергей Орлов', c: 'Подготовить оценку до 4 окт', cStyle: blue },
+{ a: '№ 1047 · Права доступа для склада', b: 'Запрошено +0:30', c: 'Ждём решения заказчика', cStyle: grey } ] },
+finance: { title: 'Финансы клиента', badge: 'Счета и акты', note: 'Счёт пополняет баланс после оплаты, акт списывает согласованные часы. Вся история — в одной ленте.', rows: [
+{ a: 'СЧ-2026-019 · Пакет 20 часов', b: '28 сентября · 60 000 ₽', c: 'Выставлен', cStyle: blue },
+{ a: 'АКТ-2026-007 · Заявки № 1031, 1036', b: '20 сентября · 9 000 ₽', c: '−3:00 с баланса', cStyle: amber },
+{ a: 'СЧ-2026-014 · Пакет 10 часов', b: '4 сентября · 30 000 ₽', c: '+10:00 на баланс', cStyle: 'font-size: 13px; font-weight: 600; color: #22663a' },
+{ a: 'Выполнено без акта', b: '3 заявки', c: '4:00 к оформлению', cStyle: grey } ] }
+};
+const tabs = [['client', 'Заказчик'], ['team', 'Команда'], ['finance', 'Финансы']].map(([id, label]) => ({ label, on: id === tab ? 'true' : 'false',
+pick: () => this.setState({ tab: id }),
+style: 'min-height: 44px; padding: 0 18px; border: 0; border-radius: 9px; font: inherit; font-size: 15px; cursor: pointer; ' + (id === tab ? 'background: #ffffff; font-weight: 600; color: #17222d; box-shadow: 0 1px 2px rgba(23,34,45,0.1)' : 'background: transparent; color: #4a5a68') }));
+const trust = ['Веб-кабинет', 'Telegram и MAX', 'Свой сервер', 'Счета и акты'];
+const segments = ['IT-аутсорс', 'Интеграторы 1С', 'Веб-студии', 'Службы поддержки', 'Внутренние ИТ-отделы'];
+const pains = [
+{ pain: 'Мы столько часов не согласовывали', fix: 'Каждая оценка одобряется клиентом, превысить лимит без нового согласования нельзя' },
+{ pain: 'Задача потерялась где-то в мессенджере', fix: 'Заявки с номером, ответственным, сроком и историей; общий чат — для вопросов без заявки' },
+{ pain: 'Сколько у нас осталось оплаченных часов?', fix: 'Баланс часов, счета и акты клиент видит сам в своём кабинете' }
+];
+const steps = [
+{ n: '01', t: 'Обращение', d: 'Клиент создаёт заявку на сайте или в боте — или пишет в общий чат, а команда оформит заявку из сообщения.' },
+{ n: '02', t: 'Оценка в часах', d: 'Ответственный оценивает объём. Клиент одобряет, просит корректировку или отклоняет.' },
+{ n: '03', t: 'Работа в лимите', d: 'Время записывается по факту. Не хватает часов — запрос дополнительных до превышения.' },
+{ n: '04', t: 'Акт и списание', d: 'Выполненные заявки собираются в акт, согласованные часы списываются с баланса.' }
+];
+const features = [
+{ t: 'Заявки и общий чат', d: 'Пять видов услуг, файлы до 10 МБ, личные и общие заявки организации.', icon: 'M4 5h16v14H4z M8 9h8 M8 13h5' },
+{ t: 'Согласование часов', d: 'Версии оценок, комментарии, запросы дополнительных часов — с полной историей.', icon: 'M5 12l4 4 10-10' },
+{ t: 'Очередь и ориентиры', d: 'Следующее действие, просрочки, загрузка сотрудников. Первый ответ — 24 часа, оценка — 3 дня.', icon: 'M4 6h16 M4 12h16 M4 18h10' },
+{ t: 'Счета, акты, баланс', d: 'Пакеты часов, индивидуальные тарифы, печатные формы, отмена с корректировкой.', icon: 'M3 7h18v12H3z M3 11h18 M7 15h4' },
+{ t: 'Организации и роли', d: 'Владелец согласует часы, участник обсуждает, наблюдатель читает.', icon: 'M4 20V8l8-4 8 4v12 M9 20v-6h6v6' },
+{ t: 'Аналитика и интеграции', d: 'Время ответа и выполнения, оценки качества, экспорт CSV, webhook для внешних систем.', icon: 'M5 20V10 M12 20V4 M19 20v-7' }
+];
+const up = 'font-family: \'IBM Plex Mono\', monospace; color: #8fe0b0';
+const down = 'font-family: \'IBM Plex Mono\', monospace; color: #ffb59a';
+const zero = 'font-family: \'IBM Plex Mono\', monospace; color: #9fb0bd';
+const ledger = [
+{ t: 'Оплачен счёт на 10 часов', d: '30 000 ₽', delta: '+10:00', style: up, bal: '10:00' },
+{ t: 'Согласована заявка', d: '2 ч + 1 доп. час · баланс не резервируется', delta: '0:00', style: zero, bal: '10:00' },
+{ t: 'Выполнено фактически', d: '2 ч 30 мин из 3 ч согласованных', delta: '0:00', style: zero, bal: '10:00' },
+{ t: 'Акт на 3 часа', d: '9 000 ₽ · списано по согласованному', delta: '−3:00', style: down, bal: '7:00' }
+];
+const roles = [
+{ t: 'Заказчику', items: ['Заявка за минуту — на сайте или в боте', 'Решение по оценке в один клик', 'Баланс, счета и акты всегда под рукой', 'Оценка качества после выполнения'] },
+{ t: 'Команде', items: ['Очередь, отсортированная по следующему действию', 'Учёт времени и лимит по каждой заявке', 'Внутренние заметки и шаблоны ответов', 'Связи с ветками и pull request'] },
+{ t: 'Руководителю', items: ['Распределение и загрузка сотрудников', 'Соблюдение ориентиров по срокам', 'Счета и акты в пару кликов', 'Аналитика с экспортом в CSV'] }
+];
+const security = [
+{ t: 'Права по ролям', d: 'Сотрудник видит только свои заявки, наблюдатель только читает.', icon: 'M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z' },
+{ t: 'Полная история', d: 'Оценки, решения, записи времени и назначения не теряются.', icon: 'M12 7v5l3 2 M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z' },
+{ t: 'Резервные копии', d: 'Встроенное копирование базы и вложений.', icon: 'M4 7c0-2 4-3 8-3s8 1 8 3-4 3-8 3-8-1-8-3z M4 7v10c0 2 4 3 8 3s8-1 8-3V7 M4 12c0 2 4 3 8 3s8-1 8-3' },
+{ t: 'Свой сервер', d: 'Данные клиентов хранятся у вас, а не в чужом облаке.', icon: 'M4 5h16v6H4z M4 13h16v6H4z M8 8h.01 M8 16h.01' }
+];
+const integrations = ['Telegram', 'MAX', 'Webhook', 'Git: ветки и PR', 'Экспорт CSV'];
+const featured = 'background: #ffffff; border: 2px solid #1f5fd1; border-radius: 18px; padding: 26px; display: flex; flex-direction: column; gap: 14px; box-shadow: 0 16px 40px rgba(31, 95, 209, 0.12)';
+const plain = 'background: #ffffff; border: 1px solid #e3e8ec; border-radius: 18px; padding: 26px; display: flex; flex-direction: column; gap: 14px';
+const btnP = 'margin-top: auto; min-height: 48px; display: inline-flex; align-items: center; justify-content: center; border-radius: 12px; background: #1f5fd1; color: #ffffff; font-weight: 600; text-decoration: none';
+const btnS = 'margin-top: auto; min-height: 48px; display: inline-flex; align-items: center; justify-content: center; border-radius: 12px; border: 1px solid #cfd8df; color: #17222d; font-weight: 600; text-decoration: none';
+const tagOn = 'font-size: 12px; font-weight: 700; color: #ffffff; background: #1f5fd1; border-radius: 99px; padding: 3px 10px';
+const plans = [
+{ name: 'Старт', tag: '', tagStyle: 'display: none', who: 'Небольшая команда и первые клиенты', price: '[цена]', per: '₽ / мес', items: ['До [N] сотрудников', 'Заявки, чат, согласование часов', 'Счета, акты и баланс', 'Telegram и MAX'], cta: 'Попробовать', card: plain, btn: btnS },
+{ name: 'Команда', tag: 'Популярный', tagStyle: tagOn, who: 'Сервисная компания с несколькими клиентами', price: '[цена]', per: '₽ / мес', items: ['До [N] сотрудников', 'Всё из «Старт»', 'Очередь, ориентиры и аналитика', 'Webhook и экспорт CSV'], cta: 'Запросить демо', card: featured, btn: btnP },
+{ name: 'Своя инсталляция', tag: '', tagStyle: 'display: none', who: 'Для компаний с особыми требованиями', price: 'по запросу', per: '', items: ['Без ограничения сотрудников', 'Развёртывание на вашем сервере', 'Настройка под ваш процесс', 'Приоритетная поддержка'], cta: 'Обсудить', card: plain, btn: btnS }
+];
+const launch = [
+{ n: '1', t: 'Разворачиваем кабинет', d: 'На вашем сервере или в подготовленной среде, с вашим доменом.' },
+{ n: '2', t: 'Заводим команду и клиентов', d: 'Сотрудники и роли, организации, тарифы и реквизиты.' },
+{ n: '3', t: 'Подключаем мессенджеры', d: 'Telegram- и MAX-боты, уведомления команде и клиентам.' }
+];
+const faq = [
+{ q: 'Списываются ли часы, когда клиент одобряет оценку?', a: 'Нет. Одобрение фиксирует лимит работы. Часы списываются с баланса при оформлении акта — по согласованному объёму.' },
+{ q: 'Что если согласованных часов не хватило?', a: 'Исполнитель отправляет запрос дополнительных часов с причиной. Пока клиент не ответил, превысить лимит и закрыть заявку нельзя.' },
+{ q: 'Можно задать вопрос без заявки?', a: 'Да, для этого есть общий чат клиента с командой. Если понадобится отдельная работа, сотрудник оформит заявку прямо из сообщения.' },
+{ q: 'Как подключаются Telegram и MAX?', a: 'Клиент получает команду в кабинете, отправляет её боту и подтверждает код на сайте. Каналы можно выбрать или отключить.' },
+{ q: 'Можно ли задать разный тариф для разных клиентов?', a: 'Да. У каждой организации или самостоятельного клиента своя ставка за час; она используется в счетах и актах.' },
+{ q: 'Что будет с ошибочным актом?', a: 'Менеджер отменяет акт — часы возвращаются на баланс, заявки снова доступны для оформления.' },
+{ q: 'Где хранятся данные?', a: 'Кабинет разворачивается на вашем сервере. [Уточнить условия хостинга и поддержки]' }
+];
+const footer = [
+{ title: 'Продукт', links: [{ label: 'Как работает', href: '#how' }, { label: 'Возможности', href: '#features' }, { label: 'Баланс часов', href: '#billing' }, { label: 'Тарифы', href: '#pricing' }] },
+{ title: 'Ресурсы', links: [{ label: 'База знаний', href: 'A-Knowledge.dc.html' }, { label: 'Вопросы и ответы', href: '#faq' }, { label: 'Вход в кабинет', href: 'A-Login.dc.html' }, { label: 'Запросить демо', href: '#demo' }] }
+];
+const showCookies = !(this.state && this.state.cookiesHidden);
+return { tabs, tour: tours[tab], trust, segments, pains, steps, features, ledger, roles, security, integrations, plans, launch, faq, footer, showCookies, hideCookies: () => this.setState({ cookiesHidden: true }) };
+}
+}
+</script>
+</body>
+</html>

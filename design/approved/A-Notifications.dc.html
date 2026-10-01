@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Уведомления</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#1a52b8}a:hover{color:#143f8f}
+</style>
+</helmet>
+<div style="width: 1440px; height: 1000px; display: grid; grid-template-columns: 240px minmax(0, 1fr); background: #f4f6f8; font-family: 'Golos Text', system-ui, sans-serif; color: #17222d; font-size: 14px; line-height: 1.45">
+<dc-import name="Sidebar" role="client" active="Уведомления" person="Анна Петрова" person-role="Владелец организации" initials="АП" hint-size="240px,1000px"></dc-import>
+<main style="padding: 28px 40px; display: flex; flex-direction: column; gap: 20px; min-width: 0; max-width: 980px">
+<div style="display: flex; justify-content: space-between; align-items: flex-end">
+<div style="display: flex; flex-direction: column; gap: 4px"><h1 style="margin: 0; font-size: 28px; font-weight: 700; letter-spacing: -0.02em">Уведомления</h1><span style="color: #5d6d7c">3 непрочитанных</span></div>
+<div style="display: flex; gap: 10px; align-items: center">
+<div style="display: flex; gap: 4px; background: #e9eef1; border-radius: 10px; padding: 3px">
+<button type="button" style="min-height: 36px; padding: 0 14px; border: 0; border-radius: 8px; background: #ffffff; font: inherit; font-size: 13px; font-weight: 600; color: #17222d">Все</button>
+<button type="button" style="min-height: 36px; padding: 0 14px; border: 0; border-radius: 8px; background: transparent; font: inherit; font-size: 13px; color: #4a5a68">Непрочитанные</button>
+</div>
+<button type="button" style="min-height: 42px; padding: 0 16px; border-radius: 10px; border: 1px solid #cfd8df; background: #ffffff; font: inherit; font-weight: 600; color: #17222d">Прочитать все</button>
+</div>
+</div>
+<sc-for list="{{groups}}" as="g" hint-placeholder-count="3">
+<section style="display: flex; flex-direction: column; gap: 8px">
+<h2 style="margin: 0; font-size: 13px; font-weight: 600; color: #5d6d7c">{{g.day}}</h2>
+<div style="background: #ffffff; border: 1px solid #e3e8ec; border-radius: 14px; display: flex; flex-direction: column; overflow: hidden">
+<sc-for list="{{g.items}}" as="n" hint-placeholder-count="3">
+<a href="A-ClientTicket.dc.html" style="{{n.rowStyle}}">
+<span style="{{n.iconStyle}}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{n.icon}}"></path></svg></span>
+<span style="display: flex; flex-direction: column; min-width: 0; flex-grow: 1"><strong style="{{n.titleStyle}}">{{n.title}}</strong><span style="font-size: 13px; color: #5d6d7c">{{n.text}}</span></span>
+<span style="font-size: 12px; color: #5d6d7c; white-space: nowrap">{{n.time}}</span>
+<span style="{{n.dotStyle}}"></span>
+</a>
+</sc-for>
+</div>
+</section>
+</sc-for>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1000}}'>
+class Component extends DCLogic {
+renderVals() {
+const ic = {
+est: ['M12 7v5l3 2 M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z', '#fff1d9', '#7a5410'],
+msg: ['M4 5h16v11H9l-5 4z', '#e4edfb', '#234f8f'],
+st: ['M5 12l4 4 10-10', '#e3ecfc', '#1a4fb0'],
+doc: ['M6 3h9l4 4v14H6z M9 12h7 M9 16h7', '#eef1f3', '#4a5a68'],
+plus: ['M12 5v14 M5 12h14', '#fff1d9', '#7a5410']
+};
+const mk = (kind, title, text, time, unread) => ({
+title, text, time,
+icon: ic[kind][0],
+iconStyle: 'width: 40px; height: 40px; border-radius: 10px; display: grid; place-items: center; flex-shrink: 0; background: ' + ic[kind][1] + '; color: ' + ic[kind][2],
+rowStyle: 'display: flex; align-items: center; gap: 14px; padding: 14px 20px; border-bottom: 1px solid #eef1f3; text-decoration: none; color: #17222d; background: ' + (unread ? '#f5f8fe' : '#ffffff'),
+titleStyle: 'font-weight: ' + (unread ? '700' : '500'),
+dotStyle: unread ? 'width: 8px; height: 8px; border-radius: 50%; background: #1f5fd1; flex-shrink: 0' : 'width: 8px; height: 8px; flex-shrink: 0'
+});
+const groups = [
+{ day: 'Сегодня', items: [
+mk('plus', 'Запрос дополнительных 0:30 · № 1047', 'Иван Смирнов: нужно настроить ещё одну роль для кладовщиков', '11:20', true),
+mk('est', 'Новая оценка 4:00 · № 1045', 'Версия 2 с учётом ваших пожеланий', '09:12', true),
+mk('msg', 'Ответ в общем чате', 'Мария Волкова: В разделе «Финансы» → «Документы»…', '09:41', true)
+] },
+{ day: 'Вчера', items: [
+mk('st', '№ 1048 выполнена', 'Проверьте результат и оцените работу', '18:05', false),
+mk('msg', 'Сообщение · № 1042', 'Иван Смирнов: Скидки теперь передаются отдельной строкой', '10:40', false)
+] },
+{ day: '28 сентября', items: [
+mk('doc', 'Выставлен счёт СЧ-2026-019', 'Пакет 20 часов, 60 000 ₽', '16:30', false),
+mk('st', 'Назначен ответственный · № 1049', 'Заявку ведёт Сергей Орлов', '12:02', false)
+] }
+];
+return { groups };
+}
+}
+</script>
+</body>
+</html>

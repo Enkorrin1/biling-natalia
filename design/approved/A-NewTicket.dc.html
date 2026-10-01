@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Новая заявка</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#1a52b8}a:hover{color:#143f8f}
+</style>
+</helmet>
+<div style="width: 1440px; height: 1000px; display: grid; grid-template-columns: 240px minmax(0, 1fr); background: #f4f6f8; font-family: 'Golos Text', system-ui, sans-serif; color: #17222d; font-size: 14px; line-height: 1.45">
+<dc-import name="Sidebar" role="client" active="Мои заявки" person="Анна Петрова" person-role="Владелец организации" initials="АП" hint-size="240px,1000px"></dc-import>
+<main style="padding: 28px 40px; display: flex; flex-direction: column; gap: 20px; min-width: 0">
+<div style="display: flex; flex-direction: column; gap: 4px">
+<div style="display: flex; gap: 8px; font-size: 13px; color: #5d6d7c"><a href="A-ClientTickets.dc.html">Мои заявки</a><span>/</span><span>Новая</span></div>
+<h1 style="margin: 0; font-size: 28px; font-weight: 700; letter-spacing: -0.02em">Новая заявка</h1>
+</div>
+<div style="display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 20px; align-items: start">
+<form style="background: #ffffff; border: 1px solid #e3e8ec; border-radius: 14px; padding: 26px 28px; display: flex; flex-direction: column; gap: 22px">
+<fieldset style="border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px">
+<legend style="font-size: 13px; font-weight: 600; padding: 0; margin-bottom: 10px">Что нужно сделать</legend>
+<div style="display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px">
+<sc-for list="{{types}}" as="t" hint-placeholder-count="5">
+<label style="{{t.style}}">
+<input type="radio" name="kind" style="position: absolute; opacity: 0; width: 1px; height: 1px">
+<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{t.icon}}"></path></svg>
+<strong style="font-size: 14px; font-weight: 600">{{t.label}}</strong>
+<span style="font-size: 12px; color: #5d6d7c">{{t.hint}}</span>
+</label>
+</sc-for>
+</div>
+</fieldset>
+<label style="display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600">Тема
+<input type="text" value="Выгрузка заказов в 1С по расписанию" style="min-height: 46px; border: 1px solid #cfd8df; border-radius: 10px; padding: 0 14px; font: inherit; font-weight: 400; color: #17222d"></label>
+<label style="display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600">Описание и ожидаемый результат
+<textarea rows="7" style="border: 1px solid #cfd8df; border-radius: 10px; padding: 12px 14px; font: inherit; font-weight: 400; color: #17222d; resize: vertical; white-space: pre-line">Сейчас: заказы выгружаем вручную раз в день.
+Нужно: автоматическая выгрузка каждый час, со скидками и статусом оплаты.
+Где проверить: тестовая база 1С, доступ пришлём в переписке.</textarea>
+<span style="font-size: 12px; font-weight: 400; color: #5d6d7c">Шаблон для интеграции: что есть сейчас, что нужно, где проверить</span></label>
+<div style="display: flex; flex-direction: column; gap: 8px">
+<span style="font-size: 13px; font-weight: 600">Файлы</span>
+<div style="border: 1.5px dashed #c3ced6; border-radius: 12px; padding: 18px; display: flex; align-items: center; gap: 14px; background: #f9fbfc">
+<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#4a5a68" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 16V4 M7 9l5-5 5 5 M4 16v4h16v-4"></path></svg>
+<span style="flex-grow: 1; color: #4a5a68">Перетащите файлы или <button type="button" style="border: 0; background: none; padding: 0; font: inherit; color: #1a52b8; font-weight: 600; text-decoration: underline">выберите на компьютере</button><br><span style="font-size: 12px; color: #5d6d7c">Изображения, PDF, документы, таблицы, TXT, CSV, ZIP — до 10 МБ</span></span>
+</div>
+<div style="display: flex; gap: 8px; flex-wrap: wrap">
+<span style="display: inline-flex; align-items: center; gap: 8px; padding: 6px 6px 6px 12px; border-radius: 99px; background: #eef2f5; font-size: 13px">schema-orders.xlsx · 48 КБ<button type="button" aria-label="Убрать файл schema-orders.xlsx" style="width: 28px; height: 28px; border: 0; border-radius: 50%; background: #dfe6eb; color: #4a5a68; font: inherit">×</button></span>
+<span style="display: inline-flex; align-items: center; gap: 8px; padding: 6px 6px 6px 12px; border-radius: 99px; background: #eef2f5; font-size: 13px">screen-export.png · 312 КБ<button type="button" aria-label="Убрать файл screen-export.png" style="width: 28px; height: 28px; border: 0; border-radius: 50%; background: #dfe6eb; color: #4a5a68; font: inherit">×</button></span>
+</div>
+</div>
+<fieldset style="border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px">
+<legend style="font-size: 13px; font-weight: 600; padding: 0; margin-bottom: 8px">Кто видит заявку</legend>
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px">
+<label style="display: flex; gap: 10px; align-items: flex-start; border: 1px solid #cfd8df; border-radius: 12px; padding: 12px 14px"><input type="radio" name="vis" style="margin-top: 3px; accent-color: #1f5fd1; width: 18px; height: 18px"><span style="display: flex; flex-direction: column"><strong style="font-weight: 600">Только я</strong><span style="font-size: 12px; color: #5d6d7c">Личная заявка</span></span></label>
+<label style="display: flex; gap: 10px; align-items: flex-start; border: 2px solid #1f5fd1; background: #f2f6fe; border-radius: 12px; padding: 11px 13px"><input type="radio" name="vis" checked style="margin-top: 3px; accent-color: #1f5fd1; width: 18px; height: 18px"><span style="display: flex; flex-direction: column"><strong style="font-weight: 600">Вся организация</strong><span style="font-size: 12px; color: #5d6d7c">Видят участники ООО «Северный ветер», часы согласует владелец</span></span></label>
+</div>
+</fieldset>
+<div style="display: flex; gap: 10px; padding-top: 6px; border-top: 1px solid #e3e8ec">
+<button type="submit" style="min-height: 46px; padding: 0 22px; border-radius: 10px; border: 0; background: #1f5fd1; color: #ffffff; font: inherit; font-weight: 600">Отправить заявку</button>
+<a href="A-ClientTickets.dc.html" style="min-height: 46px; display: inline-flex; align-items: center; padding: 0 18px; border-radius: 10px; border: 1px solid #cfd8df; color: #17222d; text-decoration: none; font-weight: 600">Отмена</a>
+</div>
+</form>
+<aside style="display: flex; flex-direction: column; gap: 16px">
+<section style="background: #ffffff; border: 1px solid #e3e8ec; border-radius: 14px; padding: 18px 20px; display: flex; flex-direction: column; gap: 12px">
+<h2 style="margin: 0; font-size: 15px; font-weight: 600">Возможно, ответ уже есть</h2>
+<a href="A-Knowledge.dc.html" style="display: flex; flex-direction: column; text-decoration: none; color: #17222d; padding: 10px 0; border-top: 1px solid #eef1f3"><strong style="font-weight: 600">Как настроить расписание обмена с 1С</strong><span style="font-size: 12px; color: #5d6d7c">Интеграции · 4 мин чтения</span></a>
+<a href="A-Knowledge.dc.html" style="display: flex; flex-direction: column; text-decoration: none; color: #17222d; padding: 10px 0; border-top: 1px solid #eef1f3"><strong style="font-weight: 600">Почему заказ не выгрузился</strong><span style="font-size: 12px; color: #5d6d7c">Интеграции · 2 мин чтения</span></a>
+</section>
+<section style="background: #ffffff; border: 1px solid #e3e8ec; border-radius: 14px; padding: 18px 20px; display: flex; flex-direction: column; gap: 14px">
+<h2 style="margin: 0; font-size: 15px; font-weight: 600">Что будет дальше</h2>
+<sc-for list="{{steps}}" as="s" hint-placeholder-count="4">
+<div style="display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 10px">
+<span style="width: 28px; height: 28px; border-radius: 50%; background: #e6eefc; color: #1a4fb0; display: grid; place-items: center; font-size: 13px; font-weight: 700">{{s.n}}</span>
+<span style="display: flex; flex-direction: column"><strong style="font-weight: 600; font-size: 13px">{{s.t}}</strong><span style="font-size: 12px; color: #5d6d7c">{{s.d}}</span></span>
+</div>
+</sc-for>
+</section>
+</aside>
+</div>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1000}}'>
+class Component extends DCLogic {
+renderVals() {
+const list = [
+['Доработка', 'Изменить то, что есть', 'M14 4l6 6-10 10H4v-6z'],
+['Интеграция', 'Связать системы', 'M8 7l-5 5 5 5 M16 7l5 5-5 5', true],
+['Поддержка', 'Что-то не работает', 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z M12 8v5 M12 16v.5'],
+['Консультация', 'Нужен совет', 'M4 5h16v11H9l-5 4z'],
+['Другое', 'Не подходит ничего', 'M5 12h.01 M12 12h.01 M19 12h.01']
+];
+const types = list.map(([label, hint, icon, on]) => ({ label, hint, icon,
+style: 'position: relative; display: flex; flex-direction: column; gap: 6px; padding: 14px; border-radius: 12px; cursor: pointer; ' + (on ? 'border: 2px solid #1f5fd1; background: #f2f6fe; color: #1a4fb0' : 'border: 1px solid #cfd8df; color: #17222d')
+}));
+const steps = [
+{ n: '1', t: 'Назначим ответственного', d: 'Первый ответ — в течение 24 часов' },
+{ n: '2', t: 'Оценим работу в часах', d: 'Обычно до 3 дней, с пояснением' },
+{ n: '3', t: 'Вы согласуете оценку', d: 'Без вашего решения работа не начнётся' },
+{ n: '4', t: 'Работа в пределах лимита', d: 'Если часов не хватит — спросим заранее' }
+];
+return { types, steps };
+}
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,310 @@
+{
+  "v": 3,
+  "attachments": {},
+  "boards": {
+    "A-ActNew.dc.html": {
+      "h": 1000,
+      "page": "team",
+      "title": "Менеджер · Формирование акта",
+      "w": 1440,
+      "x": 1520,
+      "y": 1120
+    },
+    "A-Analytics.dc.html": {
+      "h": 1000,
+      "page": "team",
+      "title": "Руководитель · Аналитика",
+      "w": 1440,
+      "x": 0,
+      "y": 2240
+    },
+    "A-ClientChat.dc.html": {
+      "h": 1000,
+      "page": "client",
+      "title": "Заказчик · Общий чат",
+      "w": 1440,
+      "x": 1520,
+      "y": 1120
+    },
+    "A-ClientFinance.dc.html": {
+      "h": 1000,
+      "page": "client",
+      "title": "Заказчик · Финансы",
+      "w": 1440,
+      "x": 3040,
+      "y": 1120
+    },
+    "A-ClientTicket.dc.html": {
+      "h": 1000,
+      "page": "client",
+      "title": "Заказчик · Заявка, решение по оценке",
+      "w": 1440,
+      "x": 0,
+      "y": 1120
+    },
+    "A-ClientTickets.dc.html": {
+      "h": 1000,
+      "page": "client",
+      "title": "Заказчик · Мои заявки",
+      "w": 1440,
+      "x": 1520,
+      "y": 0
+    },
+    "A-Finance.dc.html": {
+      "h": 1000,
+      "page": "team",
+      "title": "Менеджер · Финансы клиента",
+      "w": 1440,
+      "x": 0,
+      "y": 1120
+    },
+    "A-Integrations.dc.html": {
+      "h": 1000,
+      "page": "team",
+      "title": "Администратор · Интеграции",
+      "w": 1440,
+      "x": 3040,
+      "y": 2240
+    },
+    "A-Invoice.dc.html": {
+      "h": 1123,
+      "page": "client",
+      "title": "Печатная форма счёта",
+      "w": 794,
+      "x": 0,
+      "y": 3360
+    },
+    "A-Knowledge.dc.html": {
+      "h": 1000,
+      "page": "client",
+      "title": "База знаний",
+      "w": 1440,
+      "x": 3040,
+      "y": 2240
+    },
+    "A-Login.dc.html": {
+      "h": 1000,
+      "page": "client",
+      "title": "Вход и регистрация",
+      "w": 1440,
+      "x": 0,
+      "y": 0
+    },
+    "A-NewTicket.dc.html": {
+      "h": 1000,
+      "page": "client",
+      "title": "Заказчик · Новая заявка",
+      "w": 1440,
+      "x": 3040,
+      "y": 0
+    },
+    "A-Notifications.dc.html": {
+      "h": 1000,
+      "page": "client",
+      "title": "Уведомления",
+      "w": 1440,
+      "x": 1520,
+      "y": 2240
+    },
+    "A-Orgs.dc.html": {
+      "h": 1000,
+      "page": "team",
+      "title": "Менеджер · Организации",
+      "w": 1440,
+      "x": 3040,
+      "y": 1120
+    },
+    "A-Profile.dc.html": {
+      "h": 1000,
+      "page": "client",
+      "title": "Заказчик · Профиль и мессенджеры",
+      "w": 1440,
+      "x": 0,
+      "y": 2240
+    },
+    "A-Queue.dc.html": {
+      "h": 1000,
+      "page": "team",
+      "title": "Менеджер · Очередь",
+      "w": 1440,
+      "x": 1520,
+      "y": 0
+    },
+    "A-Staff.dc.html": {
+      "h": 1000,
+      "page": "team",
+      "title": "Администратор · Сотрудники",
+      "w": 1440,
+      "x": 1520,
+      "y": 2240
+    },
+    "A-TeamChats.dc.html": {
+      "h": 1000,
+      "page": "team",
+      "title": "Команда · Общие чаты",
+      "w": 1440,
+      "x": 3040,
+      "y": 0
+    },
+    "B-Finance.dc.html": {
+      "h": 1000,
+      "page": "archive",
+      "title": "B · Реестр — финансы клиента",
+      "w": 1440,
+      "x": 1520,
+      "y": 1400
+    },
+    "B-Ticket.dc.html": {
+      "h": 1000,
+      "page": "archive",
+      "title": "B · Реестр — карточка заявки",
+      "w": 1440,
+      "x": 0,
+      "y": 1400
+    },
+    "C-Finance.dc.html": {
+      "h": 1000,
+      "page": "archive",
+      "title": "C · Пульт — финансы клиента",
+      "w": 1440,
+      "x": 1520,
+      "y": 2800
+    },
+    "C-Ticket.dc.html": {
+      "h": 1000,
+      "page": "archive",
+      "title": "C · Пульт — карточка заявки",
+      "w": 1440,
+      "x": 0,
+      "y": 2800
+    },
+    "Landing.dc.html": {
+      "expand": "fill",
+      "h": 8600,
+      "page": "landing",
+      "title": "Лендинг продукта",
+      "w": 1440,
+      "x": 0,
+      "y": 0,
+      "is_interactive": true
+    },
+    "Main.dc.html": {
+      "h": 1000,
+      "page": "team",
+      "title": "Сотрудник · Карточка заявки",
+      "w": 1440,
+      "x": 0,
+      "y": 0
+    },
+    "Sidebar.dc.html": {
+      "h": 1000,
+      "page": "team",
+      "title": "Компонент · Боковое меню",
+      "w": 240,
+      "x": 0,
+      "y": 3360
+    }
+  },
+  "createdOnFiles": {
+    "at": "2026-10-01T12:00:00Z",
+    "v": 1
+  },
+  "designSystems": [],
+  "launch": {
+    "view": "canvas",
+    "page": "landing"
+  },
+  "notes": {
+    "tA": {
+      "kind": "title1",
+      "maxW": 4480,
+      "page": "team",
+      "text": "Вариант A · Рабочие экраны команды",
+      "w": 240,
+      "x": 0,
+      "y": -260
+    },
+    "tB": {
+      "kind": "title1",
+      "maxW": 2960,
+      "page": "archive",
+      "text": "B · Реестр — строгий документный стиль",
+      "w": 240,
+      "x": 0,
+      "y": 1140
+    },
+    "tC": {
+      "kind": "title1",
+      "maxW": 2960,
+      "page": "archive",
+      "text": "C · Пульт — тёмная рабочая консоль",
+      "w": 240,
+      "x": 0,
+      "y": 2540
+    },
+    "tClient": {
+      "kind": "title1",
+      "maxW": 4480,
+      "page": "client",
+      "text": "Вариант A · Кабинет заказчика",
+      "w": 240,
+      "x": 0,
+      "y": -260
+    },
+    "tLanding": {
+      "kind": "title1",
+      "maxW": 1440,
+      "page": "landing",
+      "text": "Лендинг · Кабинет заявок",
+      "w": 240,
+      "x": 0,
+      "y": -260
+    }
+  },
+  "order": [
+    "Main.dc.html",
+    "A-Finance.dc.html",
+    "A-Login.dc.html",
+    "A-ClientTickets.dc.html",
+    "A-NewTicket.dc.html",
+    "A-ClientTicket.dc.html",
+    "A-ClientChat.dc.html",
+    "A-ClientFinance.dc.html",
+    "A-Profile.dc.html",
+    "A-Notifications.dc.html",
+    "A-Knowledge.dc.html",
+    "A-Invoice.dc.html",
+    "A-Queue.dc.html",
+    "A-TeamChats.dc.html",
+    "A-ActNew.dc.html",
+    "A-Orgs.dc.html",
+    "A-Analytics.dc.html",
+    "A-Staff.dc.html",
+    "A-Integrations.dc.html",
+    "Sidebar.dc.html",
+    "Landing.dc.html",
+    "B-Ticket.dc.html",
+    "B-Finance.dc.html",
+    "C-Ticket.dc.html",
+    "C-Finance.dc.html"
+  ],
+  "pages": [
+    {
+      "id": "landing",
+      "name": "Лендинг"
+    },
+    {
+      "id": "client",
+      "name": "Заказчик"
+    },
+    {
+      "id": "team",
+      "name": "Команда"
+    },
+    {
+      "id": "archive",
+      "name": "Варианты B и C"
+    }
+  ],
+  "title": "Биллинг — варианты дизайна"
+}

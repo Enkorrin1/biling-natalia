@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Очередь</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#1a52b8}a:hover{color:#143f8f}
+</style>
+</helmet>
+<div style="width: 1440px; height: 1000px; display: grid; grid-template-columns: 240px minmax(0, 1fr); background: #f4f6f8; font-family: 'Golos Text', system-ui, sans-serif; color: #17222d; font-size: 14px; line-height: 1.45">
+<dc-import name="Sidebar" role="manager" active="Очередь" person="Ольга Кузнецова" person-role="Менеджер" initials="ОК" hint-size="240px,1000px"></dc-import>
+<main style="padding: 28px 40px; display: flex; flex-direction: column; gap: 20px; min-width: 0">
+<div style="display: flex; justify-content: space-between; align-items: flex-end">
+<div style="display: flex; flex-direction: column; gap: 4px"><h1 style="margin: 0; font-size: 28px; font-weight: 700; letter-spacing: -0.02em">Очередь</h1><span style="color: #5d6d7c">Заявки и чаты, отсортированные по следующему действию</span></div>
+<button type="button" style="min-height: 44px; padding: 0 18px; border-radius: 10px; border: 0; background: #1f5fd1; color: #ffffff; font: inherit; font-weight: 600">Заявка за заказчика</button>
+</div>
+<div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px">
+<sc-for list="{{kpis}}" as="k" hint-placeholder-count="4">
+<button type="button" style="{{k.style}}"><span style="font-size: 13px; color: {{k.labelColor}}">{{k.label}}</span><strong style="font-family: 'IBM Plex Mono', monospace; font-size: 28px; font-weight: 500">{{k.value}}</strong></button>
+</sc-for>
+</div>
+<div style="display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 20px; flex-grow: 1; min-height: 0">
+<section style="background: #ffffff; border: 1px solid #e3e8ec; border-radius: 14px; display: flex; flex-direction: column">
+<div style="display: grid; grid-template-columns: 34px minmax(0, 1fr) 230px 130px 180px; gap: 14px; padding: 12px 20px; font-size: 12px; color: #5d6d7c; border-bottom: 1px solid #e3e8ec">
+<span></span><span>Обращение</span><span>Следующее действие</span><span>Ориентир</span><span>Ответственный</span>
+</div>
+<sc-for list="{{rows}}" as="r" hint-placeholder-count="8">
+<div style="display: grid; grid-template-columns: 34px minmax(0, 1fr) 230px 130px 180px; gap: 14px; padding: 13px 20px; align-items: center; border-bottom: 1px solid #eef1f3">
+<span style="{{r.kindStyle}}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{r.icon}}"></path></svg></span>
+<span style="display: flex; flex-direction: column; min-width: 0"><a href="Main.dc.html" style="font-weight: 600; color: #17222d; text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{r.title}}</a><span style="font-size: 12px; color: #5d6d7c">{{r.meta}}</span></span>
+<span style="{{r.actionStyle}}">{{r.action}}</span>
+<span style="{{r.slaStyle}}">{{r.sla}}</span>
+<label style="display: flex"><span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">Ответственный</span><select style="{{r.selectStyle}}"><option>{{r.owner}}</option><option>Иван Смирнов</option><option>Мария Волкова</option><option>Сергей Орлов</option></select></label>
+</div>
+</sc-for>
+</section>
+<aside style="display: flex; flex-direction: column; gap: 16px">
+<section style="background: #ffffff; border: 1px solid #e3e8ec; border-radius: 14px; padding: 18px 20px; display: flex; flex-direction: column; gap: 14px">
+<div style="display: flex; justify-content: space-between; align-items: baseline"><h2 style="margin: 0; font-size: 15px; font-weight: 600">Загрузка команды</h2><span style="font-size: 12px; color: #5d6d7c">часов в работе</span></div>
+<sc-for list="{{load}}" as="l" hint-placeholder-count="4">
+<div style="display: flex; flex-direction: column; gap: 6px">
+<div style="display: flex; justify-content: space-between; font-size: 13px"><span>{{l.name}}</span><span style="font-family: 'IBM Plex Mono', monospace">{{l.hours}} · {{l.count}}</span></div>
+<div style="height: 8px; border-radius: 99px; background: #e9eef1; overflow: hidden"><div style="{{l.bar}}"></div></div>
+</div>
+</sc-for>
+</section>
+<section style="background: #ffffff; border: 1px solid #e3e8ec; border-radius: 14px; padding: 18px 20px; display: flex; flex-direction: column; gap: 8px">
+<h2 style="margin: 0; font-size: 15px; font-weight: 600">Ориентиры</h2>
+<div style="display: flex; justify-content: space-between; font-size: 13px"><span style="color: #5d6d7c">Первый ответ</span><span>24 ч</span></div>
+<div style="display: flex; justify-content: space-between; font-size: 13px"><span style="color: #5d6d7c">Оценка</span><span>3 дня</span></div>
+<span style="font-size: 12px; color: #5d6d7c">Календарные часы, выходные не исключаются</span>
+</section>
+</aside>
+</div>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1000}}'>
+class Component extends DCLogic {
+renderVals() {
+const card = (bg, border) => 'text-align: left; font: inherit; color: #17222d; display: flex; flex-direction: column; gap: 4px; padding: 16px 18px; border-radius: 14px; background: ' + bg + '; border: 1px solid ' + border;
+const kpis = [
+{ label: 'Без ответственного', value: '3', style: card('#ffffff', '#e3e8ec'), labelColor: '#5d6d7c' },
+{ label: 'Просрочен ориентир', value: '1', style: card('#fdecea', '#f4c7c0'), labelColor: '#8f2a1c' },
+{ label: 'Ждут оценки', value: '2', style: card('#ffffff', '#e3e8ec'), labelColor: '#5d6d7c' },
+{ label: 'Чаты без ответа', value: '2', style: card('#ffffff', '#e3e8ec'), labelColor: '#5d6d7c' }
+];
+const T = 'M4 5h16v14H4z M8 9h8 M8 13h5', C = 'M4 5h16v11H9l-5 4z';
+const kind = (chat) => 'width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; background: ' + (chat ? '#e4edfb' : '#eef2f5') + '; color: ' + (chat ? '#234f8f' : '#4a5a68');
+const act = 'font-size: 13px; font-weight: 600; color: #1a4fb0';
+const wait = 'font-size: 13px; color: #4a5a68';
+const sla = (s) => s === 'over' ? 'justify-self: start; font-size: 12px; font-weight: 600; padding: 3px 8px; border-radius: 6px; background: #fdecea; color: #8f2a1c' : s === 'soon' ? 'justify-self: start; font-size: 12px; font-weight: 600; padding: 3px 8px; border-radius: 6px; background: #fff1d9; color: #7a5410' : 'font-size: 12px; color: #5d6d7c';
+const sel = (empty) => 'width: 100%; min-height: 38px; border-radius: 9px; padding: 0 8px; font: inherit; font-size: 13px; background: #ffffff; ' + (empty ? 'border: 1px dashed #1f5fd1; color: #1a4fb0; font-weight: 600' : 'border: 1px solid #cfd8df; color: #17222d');
+const data = [
+[false, '№ 1050 · Ошибка при оплате картой', 'ООО «Лес и камень» · Поддержка · 26 ч назад', 'Назначить ответственного', act, 'просрочен 2 ч', 'over', 'Назначить', true],
+[true, 'Чат · ИП Соколова', '«Подскажите по акту за август…» · 5 ч назад', 'Ответить в чате', act, '19 ч до ориентира', 'soon', 'Назначить', true],
+[false, '№ 1049 · Не приходят уведомления в Telegram', 'ООО «Северный ветер» · Поддержка', 'Подготовить оценку', act, 'оценка до 4 окт', 'ok', 'Сергей Орлов', false],
+[false, '№ 1051 · Новый отчёт по продажам', 'ООО «Альфа-Трейд» · Доработка · 2 ч назад', 'Назначить ответственного', act, '22 ч до ориентира', 'ok', 'Назначить', true],
+[false, '№ 1047 · Права доступа для склада', 'ООО «Северный ветер» · доп. часы +0:30', 'Ждём решения заказчика', wait, '—', 'ok', 'Иван Смирнов', false],
+[false, '№ 1045 · Отчёт по остаткам', 'ООО «Северный ветер» · оценка 4:00', 'Ждём решения заказчика', wait, '—', 'ok', 'Иван Смирнов', false],
+[true, 'Чат · ООО «Альфа-Трейд»', '«Спасибо, всё работает»', 'Ответ не требуется', wait, '—', 'ok', 'Мария Волкова', false],
+[false, '№ 1042 · Интеграция с 1С', 'ООО «Северный ветер» · 2:30 / 3:00', 'Сдать результат', act, 'срок 3 окт', 'soon', 'Иван Смирнов', false]
+];
+const rows = data.map(([chat, title, meta, action, actionStyle, s, sk, owner, empty]) => ({ title, meta, action, actionStyle, sla: s, slaStyle: sla(sk), owner, icon: chat ? C : T, kindStyle: kind(chat), selectStyle: sel(empty) }));
+const people = [['Иван Смирнов', 9.5, 4], ['Сергей Орлов', 6, 3], ['Мария Волкова', 3, 2], ['Дмитрий Ким', 1, 1]];
+const load = people.map(([name, h, c]) => ({ name, hours: String(h).replace('.5', ':30').replace(/^(\d+)$/, '$1:00'), count: c + ' заяв.', bar: 'height: 100%; width: ' + Math.min(100, h * 10) + '%; border-radius: 99px; background: ' + (h > 8 ? '#c58b2a' : '#1f5fd1') }));
+return { kpis, rows, load };
+}
+}
+</script>
+</body>
+</html>

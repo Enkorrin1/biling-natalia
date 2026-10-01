@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Профиль и мессенджеры</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#1a52b8}a:hover{color:#143f8f}
+</style>
+</helmet>
+<div style="width: 1440px; height: 1000px; display: grid; grid-template-columns: 240px minmax(0, 1fr); background: #f4f6f8; font-family: 'Golos Text', system-ui, sans-serif; color: #17222d; font-size: 14px; line-height: 1.45">
+<dc-import name="Sidebar" role="client" active="Профиль" person="Анна Петрова" person-role="Владелец организации" initials="АП" hint-size="240px,1000px"></dc-import>
+<main style="padding: 28px 40px; display: flex; flex-direction: column; gap: 20px; min-width: 0">
+<h1 style="margin: 0; font-size: 28px; font-weight: 700; letter-spacing: -0.02em">Профиль</h1>
+<div style="display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 20px; align-items: start">
+<div style="display: flex; flex-direction: column; gap: 20px">
+<form style="background: #ffffff; border: 1px solid #e3e8ec; border-radius: 14px; padding: 22px 24px; display: flex; flex-direction: column; gap: 16px">
+<h2 style="margin: 0; font-size: 16px; font-weight: 600">Личные данные</h2>
+<label style="display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600">Имя
+<input type="text" value="Анна Петрова" style="min-height: 44px; border: 1px solid #cfd8df; border-radius: 10px; padding: 0 14px; font: inherit; font-weight: 400; color: #17222d"></label>
+<label style="display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600">Компания
+<input type="text" value="ООО «Северный ветер»" style="min-height: 44px; border: 1px solid #cfd8df; border-radius: 10px; padding: 0 14px; font: inherit; font-weight: 400; color: #17222d"></label>
+<label style="display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600">Телефон
+<input type="tel" value="+7 900 000-00-00" style="min-height: 44px; border: 1px solid #cfd8df; border-radius: 10px; padding: 0 14px; font: inherit; font-weight: 400; color: #17222d">
+<span style="font-size: 12px; font-weight: 400; color: #5d6d7c">Не показывается команде в заявках</span></label>
+<label style="display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600">Email для входа
+<input type="email" value="anna@severny-veter.ru" readonly style="min-height: 44px; border: 1px solid #e3e8ec; border-radius: 10px; padding: 0 14px; font: inherit; font-weight: 400; color: #4a5a68; background: #f4f6f8"></label>
+<button type="submit" style="align-self: flex-start; min-height: 44px; padding: 0 20px; border-radius: 10px; border: 0; background: #1f5fd1; color: #ffffff; font: inherit; font-weight: 600">Сохранить</button>
+</form>
+<section style="background: #ffffff; border: 1px solid #e3e8ec; border-radius: 14px; padding: 22px 24px; display: flex; flex-direction: column; gap: 12px">
+<h2 style="margin: 0; font-size: 16px; font-weight: 600">Организация</h2>
+<div style="display: flex; justify-content: space-between; align-items: center"><strong style="font-weight: 600">ООО «Северный ветер»</strong><span style="background: #e6eefc; color: #1a4fb0; font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 99px">Владелец</span></div>
+<span style="font-size: 13px; color: #4a5a68">4 участника · вы согласуете часы по общим заявкам. Состав организации меняет менеджер исполнителя.</span>
+</section>
+</div>
+<section style="background: #ffffff; border: 1px solid #e3e8ec; border-radius: 14px; padding: 22px 24px; display: flex; flex-direction: column; gap: 18px">
+<div style="display: flex; flex-direction: column; gap: 4px"><h2 style="margin: 0; font-size: 16px; font-weight: 600">Мессенджеры</h2><span style="font-size: 13px; color: #5d6d7c">Создавайте заявки, отвечайте и согласуйте оценки прямо из чата</span></div>
+<div style="border: 1px solid #e3e8ec; border-radius: 12px; padding: 16px 18px; display: flex; align-items: center; gap: 14px">
+<span style="width: 44px; height: 44px; border-radius: 12px; background: #e4f1fb; color: #1f6aa5; display: grid; place-items: center; font-weight: 700">TG</span>
+<span style="display: flex; flex-direction: column; flex-grow: 1"><strong style="font-weight: 600">Telegram</strong><span style="font-size: 13px; color: #22663a">Подключён · @anna_sv</span></span>
+<button type="button" style="min-height: 40px; padding: 0 14px; border-radius: 10px; border: 1px solid #cfd8df; background: #ffffff; font: inherit; font-weight: 600; color: #17222d">Отключить</button>
+</div>
+<div style="border: 2px solid #1f5fd1; border-radius: 12px; padding: 16px 18px; display: flex; flex-direction: column; gap: 14px">
+<div style="display: flex; align-items: center; gap: 14px">
+<span style="width: 44px; height: 44px; border-radius: 12px; background: #ece6fb; color: #5236a8; display: grid; place-items: center; font-weight: 700">MAX</span>
+<span style="display: flex; flex-direction: column; flex-grow: 1"><strong style="font-weight: 600">MAX</strong><span style="font-size: 13px; color: #7a5410">Подключение · шаг 2 из 3</span></span>
+</div>
+<ol style="margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 10px; color: #4a5a68">
+<li>Откройте бота в MAX и отправьте команду:
+<div style="display: flex; gap: 8px; margin-top: 6px"><code style="flex-grow: 1; font-family: 'IBM Plex Mono', monospace; background: #f4f6f8; border: 1px solid #e3e8ec; border-radius: 8px; padding: 10px 12px; color: #17222d">/link 4F7K-92QD</code><button type="button" style="min-height: 42px; padding: 0 14px; border-radius: 10px; border: 1px solid #cfd8df; background: #ffffff; font: inherit; font-weight: 600; color: #17222d">Копировать</button></div></li>
+<li>Введите код, который пришлёт бот:
+<div style="display: flex; gap: 8px; margin-top: 6px"><label style="flex-grow: 1; display: flex"><span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">Код из бота</span><input type="text" placeholder="6 цифр" style="flex-grow: 1; min-height: 44px; border: 1px solid #cfd8df; border-radius: 10px; padding: 0 14px; font-family: 'IBM Plex Mono', monospace; font-size: 16px; letter-spacing: 0.2em; color: #17222d"></label><button type="button" style="min-height: 44px; padding: 0 18px; border-radius: 10px; border: 0; background: #1f5fd1; color: #ffffff; font: inherit; font-weight: 600">Подтвердить</button></div></li>
+</ol>
+</div>
+<fieldset style="border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px">
+<legend style="font-size: 13px; font-weight: 600; padding: 0; margin-bottom: 8px">Куда присылать уведомления</legend>
+<sc-for list="{{channels}}" as="c" hint-placeholder-count="4">
+<label style="display: flex; align-items: center; gap: 10px; min-height: 40px"><input type="radio" name="ch" checked="{{c.on}}" style="width: 18px; height: 18px; accent-color: #1f5fd1">{{c.label}}</label>
+</sc-for>
+</fieldset>
+<p style="margin: 0; font-size: 12px; color: #5d6d7c">Уведомления в кабинете приходят всегда. Отключение мессенджера останавливает новые сообщения и удаляет черновики заявок в боте.</p>
+</section>
+</div>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1000}}'>
+class Component extends DCLogic {
+renderVals() {
+const channels = [
+{ label: 'Только Telegram', on: true },
+{ label: 'Только MAX', on: false },
+{ label: 'Оба мессенджера', on: false },
+{ label: 'Не присылать во внешние каналы', on: false }
+];
+return { channels };
+}
+}
+</script>
+</body>
+</html>

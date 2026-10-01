@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Мои заявки</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#1a52b8}a:hover{color:#143f8f}
+</style>
+</helmet>
+<div style="width: 1440px; height: 1000px; display: grid; grid-template-columns: 240px minmax(0, 1fr); background: #f4f6f8; font-family: 'Golos Text', system-ui, sans-serif; color: #17222d; font-size: 14px; line-height: 1.45">
+<dc-import name="Sidebar" role="client" active="Мои заявки" person="Анна Петрова" person-role="Владелец организации" initials="АП" hint-size="240px,1000px"></dc-import>
+<main style="padding: 28px 40px; display: flex; flex-direction: column; gap: 20px; min-width: 0">
+<div style="display: flex; justify-content: space-between; align-items: flex-end">
+<div style="display: flex; flex-direction: column; gap: 4px">
+<h1 style="margin: 0; font-size: 28px; font-weight: 700; letter-spacing: -0.02em">Мои заявки</h1>
+<span style="color: #5d6d7c">Личные и общие заявки ООО «Северный ветер»</span>
+</div>
+<a href="A-NewTicket.dc.html" style="display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 18px; border-radius: 10px; background: #1f5fd1; color: #ffffff; font-weight: 600; text-decoration: none">
+<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14 M5 12h14"></path></svg>Новая заявка</a>
+</div>
+
+<div style="background: #fff6e6; border: 1px solid #f0dcb4; border-radius: 14px; padding: 16px 20px; display: flex; align-items: center; gap: 16px">
+<div style="width: 40px; height: 40px; border-radius: 10px; background: #f6e2bb; color: #7a5410; display: grid; place-items: center; flex-shrink: 0">
+<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 8v5 M12 16.5v.5 M10.3 3.9 2.6 17.5a2 2 0 0 0 1.7 3h15.4a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"></path></svg>
+</div>
+<div style="display: flex; flex-direction: column; flex-grow: 1">
+<strong style="color: #5c3f0a">Нужно ваше решение по 2 заявкам</strong>
+<span style="font-size: 13px; color: #7a5410">№ 1045 — оценка 4:00 ожидает согласования · № 1047 — запрос дополнительных 0:30</span>
+</div>
+<a href="A-ClientTicket.dc.html" style="min-height: 40px; display: inline-flex; align-items: center; padding: 0 16px; border-radius: 10px; background: #ffffff; border: 1px solid #e5c98f; color: #5c3f0a; font-weight: 600; text-decoration: none">Посмотреть</a>
+</div>
+
+<section style="background: #ffffff; border: 1px solid #e3e8ec; border-radius: 14px; display: flex; flex-direction: column; min-height: 0; flex-grow: 1">
+<div style="display: flex; gap: 12px; padding: 14px 20px; border-bottom: 1px solid #e3e8ec; align-items: center">
+<label style="flex-grow: 1; max-width: 360px; display: flex; align-items: center; gap: 8px; min-height: 40px; border: 1px solid #cfd8df; border-radius: 10px; padding: 0 12px; color: #5d6d7c">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14z M20 20l-4-4"></path></svg>
+<span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">Поиск</span>
+<input type="search" placeholder="Номер, тема, описание или участник" style="border: 0; outline: none; font: inherit; flex-grow: 1; color: #17222d"></label>
+<div style="display: flex; gap: 4px; background: #eef2f5; border-radius: 10px; padding: 3px">
+<sc-for list="{{filters}}" as="f" hint-placeholder-count="5"><button type="button" style="{{f.style}}">{{f.label}}</button></sc-for>
+</div>
+<label style="margin-left: auto; display: flex; align-items: center; gap: 8px; font-size: 13px; color: #5d6d7c">Видимость
+<select style="min-height: 40px; border: 1px solid #cfd8df; border-radius: 10px; padding: 0 10px; font: inherit; color: #17222d; background: #ffffff"><option>Все</option><option>Личные</option><option>Общие</option></select></label>
+</div>
+<div style="display: grid; grid-template-columns: 70px minmax(0, 1fr) 280px 120px 150px 110px; gap: 16px; padding: 10px 20px; font-size: 12px; color: #5d6d7c; border-bottom: 1px solid #eef1f3">
+<span>№</span><span>Тема</span><span>Следующий шаг</span><span style="text-align: right">Часы</span><span>Статус</span><span style="text-align: right">Обновлена</span>
+</div>
+<sc-for list="{{rows}}" as="r" hint-placeholder-count="8">
+<a href="A-ClientTicket.dc.html" style="display: grid; grid-template-columns: 70px minmax(0, 1fr) 280px 120px 150px 110px; gap: 16px; padding: 14px 20px; align-items: center; border-bottom: 1px solid #eef1f3; text-decoration: none; color: #17222d; background: {{r.bg}}">
+<span style="font-family: 'IBM Plex Mono', monospace; font-size: 13px; color: #4a5a68">{{r.no}}</span>
+<span style="display: flex; flex-direction: column; min-width: 0"><strong style="font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{r.title}}</strong><span style="font-size: 12px; color: #5d6d7c">{{r.meta}}</span></span>
+<span style="{{r.nextStyle}}">{{r.next}}</span>
+<span style="font-family: 'IBM Plex Mono', monospace; text-align: right; font-size: 13px">{{r.hours}}</span>
+<span style="{{r.badge}}">{{r.status}}</span>
+<span style="text-align: right; font-size: 13px; color: #5d6d7c">{{r.updated}}</span>
+</a>
+</sc-for>
+</section>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1000}}'>
+class Component extends DCLogic {
+renderVals() {
+const pill = (bg, fg) => 'justify-self: start; font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 99px; white-space: nowrap; background: ' + bg + '; color: ' + fg;
+const S = {
+'Новая': pill('#ece6fb', '#4b2f9a'),
+'В работе': pill('#e3ecfc', '#1a4fb0'),
+'Ожидает вас': pill('#fff1d9', '#7a5410'),
+'Выполнена': pill('#dff2e3', '#22663a'),
+'Закрыта': pill('#eef1f3', '#4a5a68')
+};
+const you = 'font-size: 13px; font-weight: 600; color: #7a5410';
+const team = 'font-size: 13px; color: #4a5a68';
+const data = [
+['1047', 'Права доступа для склада', 'Поддержка · общая', 'Решите по доп. часам +0:30', you, '0:50 / 1:00', 'Ожидает вас', 'сегодня', '#fffbf3'],
+['1045', 'Отчёт по остаткам для склада', 'Доработка · общая', 'Решите по оценке 4:00', you, '— / 4:00', 'Ожидает вас', 'сегодня', '#fffbf3'],
+['1042', 'Интеграция с 1С: выгрузка заказов', 'Интеграция · общая', 'Исполнитель готовит результат', team, '2:30 / 3:00', 'В работе', 'сегодня', '#ffffff'],
+['1049', 'Не приходят уведомления в Telegram', 'Поддержка · личная', 'Ждём оценку до 4 октября', team, '—', 'Новая', 'вчера', '#ffffff'],
+['1048', 'Консультация по обмену с маркетплейсом', 'Консультация · общая', 'Проверьте результат', you, '1:30 / 1:30', 'Выполнена', '29 сен', '#ffffff'],
+['1044', 'Импорт прайс-листов поставщиков', 'Доработка · общая', 'Оцените работу исполнителя', team, '1:20 / 1:30', 'Выполнена', '27 сен', '#ffffff'],
+['1036', 'Шаблон счёта на оплату', 'Доработка · личная', '—', team, '1:00 / 1:00', 'Закрыта', '18 сен', '#ffffff'],
+['1031', 'Перенос справочника клиентов', 'Интеграция · общая', '—', team, '2:00 / 2:00', 'Закрыта', '12 сен', '#ffffff']
+];
+const rows = data.map(([no, title, meta, next, nextStyle, hours, status, updated, bg]) => ({ no, title, meta, next, nextStyle, hours, status, updated, bg, badge: S[status] }));
+const labels = ['Все', 'Ожидают вас · 2', 'В работе', 'Выполнены', 'Закрыты'];
+const filters = labels.map((label, i) => ({ label, style: 'min-height: 34px; padding: 0 12px; border: 0; border-radius: 8px; font: inherit; font-size: 13px; ' + (i === 0 ? 'background: #ffffff; font-weight: 600; color: #17222d; box-shadow: 0 1px 2px rgba(23,34,45,0.1)' : 'background: transparent; color: #4a5a68') }));
+return { rows, filters };
+}
+}
+</script>
+</body>
+</html>

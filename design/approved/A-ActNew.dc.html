@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Формирование акта</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#1a52b8}a:hover{color:#143f8f}
+</style>
+</helmet>
+<div style="width: 1440px; height: 1000px; display: grid; grid-template-columns: 240px minmax(0, 1fr); background: #f4f6f8; font-family: 'Golos Text', system-ui, sans-serif; color: #17222d; font-size: 14px; line-height: 1.45">
+<dc-import name="Sidebar" role="manager" active="Финансы" person="Ольга Кузнецова" person-role="Менеджер" initials="ОК" hint-size="240px,1000px"></dc-import>
+<main style="padding: 28px 40px; display: flex; flex-direction: column; gap: 20px; min-width: 0">
+<div style="display: flex; flex-direction: column; gap: 4px">
+<div style="display: flex; gap: 8px; font-size: 13px; color: #5d6d7c"><a href="A-Finance.dc.html">Финансы</a><span>/</span><span>ООО «Северный ветер»</span><span>/</span><span>Новый акт</span></div>
+<h1 style="margin: 0; font-size: 28px; font-weight: 700; letter-spacing: -0.02em">Акт выполненных работ</h1>
+</div>
+<div style="display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 20px; align-items: start">
+<section style="background: #ffffff; border: 1px solid #e3e8ec; border-radius: 14px; display: flex; flex-direction: column">
+<div style="padding: 16px 22px; border-bottom: 1px solid #e3e8ec; display: flex; justify-content: space-between; align-items: center">
+<div style="display: flex; flex-direction: column"><h2 style="margin: 0; font-size: 16px; font-weight: 600">Выполненные заявки без акта</h2><span style="font-size: 13px; color: #5d6d7c">В акт попадают согласованные часы, включая одобренные дополнительные</span></div>
+<label style="display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600"><input type="checkbox" checked style="width: 18px; height: 18px; accent-color: #1f5fd1">Выбрать все</label>
+</div>
+<div style="display: grid; grid-template-columns: 30px 70px minmax(0, 1fr) 110px 110px 110px; gap: 14px; padding: 10px 22px; font-size: 12px; color: #5d6d7c; border-bottom: 1px solid #eef1f3">
+<span></span><span>№</span><span>Заявка</span><span style="text-align: right">Согласовано</span><span style="text-align: right">Фактически</span><span style="text-align: right">Сумма</span>
+</div>
+<sc-for list="{{rows}}" as="r" hint-placeholder-count="3">
+<label style="display: grid; grid-template-columns: 30px 70px minmax(0, 1fr) 110px 110px 110px; gap: 14px; padding: 16px 22px; align-items: center; border-bottom: 1px solid #eef1f3; background: #f5f8fe">
+<input type="checkbox" checked style="width: 18px; height: 18px; accent-color: #1f5fd1">
+<span style="font-family: 'IBM Plex Mono', monospace; font-size: 13px; color: #4a5a68">{{r.no}}</span>
+<span style="display: flex; flex-direction: column"><strong style="font-weight: 600">{{r.title}}</strong><span style="font-size: 12px; color: #5d6d7c">{{r.meta}}</span></span>
+<span style="font-family: 'IBM Plex Mono', monospace; text-align: right">{{r.agreed}}</span>
+<span style="font-family: 'IBM Plex Mono', monospace; text-align: right; color: #5d6d7c">{{r.fact}}</span>
+<span style="font-family: 'IBM Plex Mono', monospace; text-align: right">{{r.sum}}</span>
+</label>
+</sc-for>
+<div style="display: grid; grid-template-columns: 30px 70px minmax(0, 1fr) 110px 110px 110px; gap: 14px; padding: 16px 22px; font-weight: 700">
+<span></span><span></span><span>Итого · 3 заявки</span><span style="font-family: 'IBM Plex Mono', monospace; text-align: right">4:00</span><span style="font-family: 'IBM Plex Mono', monospace; text-align: right; color: #5d6d7c; font-weight: 500">3:40</span><span style="font-family: 'IBM Plex Mono', monospace; text-align: right">12 000 ₽</span>
+</div>
+<div style="margin: 0 22px 20px; padding: 12px 14px; border-radius: 10px; background: #f4f6f8; font-size: 13px; color: #4a5a68">Все заявки сверены с клиентом: результат принят в переписке, ожидающих запросов доп. часов нет.</div>
+</section>
+<aside style="display: flex; flex-direction: column; gap: 16px">
+<section style="background: #ffffff; border: 1px solid #e3e8ec; border-radius: 14px; padding: 20px 22px; display: flex; flex-direction: column; gap: 14px">
+<h2 style="margin: 0; font-size: 16px; font-weight: 600">Итог акта</h2>
+<div style="display: flex; justify-content: space-between"><span style="color: #5d6d7c">Номер</span><span style="font-family: 'IBM Plex Mono', monospace">АКТ-2026-008</span></div>
+<div style="display: flex; justify-content: space-between"><span style="color: #5d6d7c">Часы</span><span style="font-family: 'IBM Plex Mono', monospace">4:00 × 3 000 ₽</span></div>
+<div style="display: flex; justify-content: space-between; padding-top: 12px; border-top: 1px solid #e3e8ec"><strong>Сумма</strong><strong style="font-family: 'IBM Plex Mono', monospace; font-size: 20px; font-weight: 500">12 000 ₽</strong></div>
+</section>
+<section style="background: #ffffff; border: 1px solid #e3e8ec; border-radius: 14px; padding: 20px 22px; display: flex; flex-direction: column; gap: 12px">
+<h2 style="margin: 0; font-size: 16px; font-weight: 600">Баланс клиента</h2>
+<div style="display: flex; align-items: center; gap: 14px">
+<div style="display: flex; flex-direction: column"><span style="font-size: 12px; color: #5d6d7c">Сейчас</span><strong style="font-family: 'IBM Plex Mono', monospace; font-size: 24px; font-weight: 500">7:00</strong></div>
+<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#5d6d7c" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14 M13 6l6 6-6 6"></path></svg>
+<div style="display: flex; flex-direction: column"><span style="font-size: 12px; color: #5d6d7c">После акта</span><strong style="font-family: 'IBM Plex Mono', monospace; font-size: 24px; font-weight: 500; color: #1a4fb0">3:00</strong></div>
+</div>
+<span style="font-size: 12px; color: #5d6d7c">Часы списываются сразу при создании акта. Если отменить акт, они вернутся на баланс.</span>
+</section>
+<button type="button" style="min-height: 48px; border-radius: 10px; border: 0; background: #1f5fd1; color: #ffffff; font: inherit; font-weight: 600; font-size: 15px">Создать акт и списать 4:00</button>
+<a href="A-Finance.dc.html" style="min-height: 44px; display: inline-flex; align-items: center; justify-content: center; border-radius: 10px; border: 1px solid #cfd8df; color: #17222d; text-decoration: none; font-weight: 600">Отмена</a>
+</aside>
+</div>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1000}}'>
+class Component extends DCLogic {
+renderVals() {
+const rows = [
+{ no: '1044', title: 'Импорт прайс-листов поставщиков', meta: 'Выполнена 27 сен · оценка 1:30', agreed: '1:30', fact: '1:20', sum: '4 500 ₽' },
+{ no: '1046', title: 'Права доступа для бухгалтерии', meta: 'Закрыта 28 сен · оценка 1:00', agreed: '1:00', fact: '0:50', sum: '3 000 ₽' },
+{ no: '1048', title: 'Консультация по обмену с маркетплейсом', meta: 'Выполнена 30 сен · 1:00 + доп. 0:30', agreed: '1:30', fact: '1:30', sum: '4 500 ₽' }
+];
+return { rows };
+}
+}
+</script>
+</body>
+</html>
