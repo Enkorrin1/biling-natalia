@@ -1,4 +1,4 @@
-const CACHE_NAME = 'codari-hierarchy-v11';
+const CACHE_NAME = 'codari-workspace-v13';
 const STATIC_ASSETS = [
   '/?login',
   '/landing',
