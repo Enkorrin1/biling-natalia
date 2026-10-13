@@ -436,6 +436,8 @@ def install_routes(app, domain):
                 raise HTTPException(403,"Участник может читать запись; изменять её может ответственный")
         return row
 
+    domain.team_record_for = get_entity
+
     def enriched(conn,kind,row,user):
         item = dict(row)
         item['customer_name'] = conn.execute("SELECT name FROM users WHERE id=?", (row['customer_id'],)).fetchone()[0] if row['customer_id'] else 'Внутренняя задача'

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'codari-workspace-v10';
+const CACHE_NAME = 'codari-hierarchy-v11';
 const STATIC_ASSETS = [
   '/?login',
   '/landing',
@@ -7,6 +7,7 @@ const STATIC_ASSETS = [
   '/tour.css',
   '/tour.js',
   '/main.js',
+  '/hierarchy.js',
   '/team.js',
   '/tasks.js',
   '/manifest.json',

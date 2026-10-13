@@ -150,7 +150,8 @@ class BotEngine:
     def ticket(self, conn, link, user, ticket_id):
         t = self.desk.ticket_for(conn, ticket_id, user)
         e = self.desk.latest_estimate(conn, ticket_id)
-        text = f"Заявка №{t['id']} · {t['title']}\n{t['description']}\n\nСледующий шаг: {self.desk.customer_next_step(t, e)}"
+        context = self.desk.hierarchy.ticket_context(conn,t)
+        text = f"{context['company_name']} → {context['project_name']}\nЗаявка №{t['id']} · {t['title']}\n{t['description']}\n\nСледующий шаг: {self.desk.customer_next_step(t, e)}"
         buttons = [[self.button(conn, link, "Переписка", "history", kind="ticket", record=ticket_id)]]
         if t["status"] != "closed":
             buttons.append([self.button(conn, link, f"Ответить по заявке №{ticket_id}", "reply", kind="ticket", record=ticket_id)])

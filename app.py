@@ -30,6 +30,7 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 import mailer
 import team_management
 import company_chat
+import hierarchy
 from web_push import WebPush, b64url_decode
 
 
@@ -555,6 +556,7 @@ def init_db():
         init_bot_schema(conn)
         team_management.init_schema(conn)
         company_chat.init_schema(conn)
+        hierarchy.init_schema(conn)
 
 
 init_db()
@@ -739,6 +741,8 @@ SUPPORT_NAME = "Служба поддержки"
 def customer_record(conn, row, viewer):
     """Expose service identities to customers; retain staff attribution internally."""
     item = dict(row)
+    if "project_id" in item and "customer_id" in item and "title" in item:
+        item.update(hierarchy.ticket_context(conn, row))
     if viewer["role"] != "customer":
         return item
     for key in ("assignee_id", "assignee_name", "assignee_profile", "participants"):
@@ -896,11 +900,12 @@ def customer_notification_text(text, viewer):
 def notify(conn, user_id, ticket_id, kind, message):
     if user_id is None:
         return
+    context = hierarchy.ticket_context(conn, conn.execute('SELECT * FROM tickets WHERE id=?',(ticket_id,)).fetchone())
     cursor = conn.execute("INSERT INTO notifications(user_id,ticket_id,kind,text,created_at) VALUES(?,?,?,?,?)",
                           (user_id, ticket_id, kind, message, now()))
     bot_engine.enqueue_notification(conn, user_id, "ticket", ticket_id, kind, message)
-    realtime_bus.publish(user_id, {"type": "notification", "target": "ticket", "record_id": ticket_id, "kind": kind, "text": message})
-    web_push.enqueue(user_id, {"title": f"Заявка №{ticket_id}", "body": message, "url": f"/#ticket/{ticket_id}", "tag": f"ticket-{ticket_id}"})
+    realtime_bus.publish(user_id, {"type": "notification", "target": "ticket", "record_id": ticket_id, "kind": kind, "text": message, "context": context})
+    web_push.enqueue(user_id, {"title": f"{context['company_name']} · {context['project_name']} · №{ticket_id}", "body": message, "url": f"/#ticket/{ticket_id}", "tag": f"ticket-{ticket_id}"})
     queue_notification_email(conn, user_id, "ticket", ticket_id, kind, message, cursor.lastrowid)
 
 
@@ -930,10 +935,10 @@ def chat_message_recipients(conn, chat, user):
     return recipients
 
 
-def notify_chat(conn, user_id, chat_id, kind, message):
+def notify_chat(conn, user_id, chat_id, kind, message, ticket_id=None):
     if user_id is not None:
-        cursor = conn.execute("INSERT INTO chat_notifications(user_id,chat_id,kind,text,created_at) VALUES(?,?,?,?,?)",
-                              (user_id, chat_id, kind, message, now()))
+        cursor = conn.execute("INSERT INTO chat_notifications(user_id,chat_id,kind,text,created_at,related_ticket_id) VALUES(?,?,?,?,?,?)",
+                              (user_id, chat_id, kind, message, now(), ticket_id))
         bot_engine.enqueue_notification(conn, user_id, "chat", chat_id, kind, message)
         realtime_bus.publish(user_id, {"type": "notification", "target": "chat", "record_id": chat_id, "kind": kind, "text": message})
         web_push.enqueue(user_id, {"title": "Общий чат", "body": message, "url": f"/#chat/{chat_id}", "tag": f"chat-{chat_id}"})
@@ -1015,6 +1020,7 @@ class TicketCreate(BaseModel):
     effort_minutes: int | None = Field(default=None, ge=1, le=100_000)
     assessment_minutes: int | None = Field(default=None, ge=1, le=100_000)
     estimate_note: str = Field(default="", max_length=3000)
+    project_id: int | None = Field(default=None, gt=0)
 
 
 class TicketDecline(BaseModel):
@@ -1073,6 +1079,7 @@ class EstimateDecision(BaseModel):
 class ChatTicketCreate(BaseModel):
     title: str = Field(min_length=3, max_length=140)
     message_id: int
+    project_id: int | None = Field(default=None, gt=0)
 
 
 class TimeEntryCreate(BaseModel):
@@ -1488,6 +1495,11 @@ def team_script():
     return FileResponse(ROOT / "web" / "team.js", media_type="text/javascript", headers=NO_CACHE)
 
 
+@app.get("/hierarchy.js")
+def hierarchy_script():
+    return FileResponse(ROOT / "web" / "hierarchy.js", media_type="text/javascript", headers=NO_CACHE)
+
+
 @app.get("/tasks.js")
 def tasks_script():
     return FileResponse(ROOT / "web" / "tasks.js", media_type="text/javascript", headers=NO_CACHE)
@@ -1812,7 +1824,7 @@ def read_notification(notification_id: int, desk_session: str | None = Cookie(de
                            (notification_id, user["id"])).fetchone()
         if not row:
             raise HTTPException(404, "Уведомление не найдено")
-        ticket_for(conn, row["ticket_id"], user)
+        ticket_for(conn, row["ticket_id"], user, write=False)
         conn.execute("UPDATE notifications SET read_at=COALESCE(read_at,?) WHERE id=?", (now(), notification_id))
     return {"ok": True}
 
@@ -2099,6 +2111,7 @@ def ticket_from_chat(chat_id: int, data: ChatTicketCreate, desk_session: str | N
                 message["body"], "new", stamp, stamp, org["id"] if org else None,
                 "organization" if org else "private", (datetime.now(timezone.utc)+timedelta(hours=24)).isoformat(),
                 (datetime.now(timezone.utc)+timedelta(days=3)).isoformat()))
+        hierarchy.assign_ticket(conn, cursor.lastrowid, user, sys.modules[__name__], data.project_id)
         conn.execute("""INSERT INTO attachments(ticket_id,author_id,filename,stored_name,content_type,size,created_at)
             SELECT ?,author_id,filename,stored_name,content_type,size,? FROM attachments
             WHERE chat_id=? AND chat_message_id=?""", (cursor.lastrowid, stamp, chat_id, data.message_id))
@@ -2106,7 +2119,7 @@ def ticket_from_chat(chat_id: int, data: ChatTicketCreate, desk_session: str | N
             VALUES(?,?,?,?,?)""", (chat_id, cursor.lastrowid, data.message_id, user["id"], stamp))
         for recipient in chat_recipients(conn, chat):
             notify_chat(conn, recipient, chat_id, "ticket_created",
-                        f"Из общего чата создана заявка №{cursor.lastrowid}: {title}")
+                        f"Из общего чата создана заявка №{cursor.lastrowid}: {title}", ticket_id=cursor.lastrowid)
         if chat["assignee_id"]:
             notify(conn, chat["assignee_id"], cursor.lastrowid, "new_ticket", f"Новая заявка №{cursor.lastrowid}: {title}")
         else:
@@ -2301,6 +2314,7 @@ def tickets(desk_session: str | None = Cookie(default=None)):
         result = []
         for row in rows:
             item = ticket_dict(row)
+            item.update(hierarchy.ticket_context(conn, row))
             estimate = latest_estimate(conn, row["id"])
             item["estimate_state"] = estimate["state"] if estimate else None
             item["effort_minutes"] = estimate["effort_minutes"] if estimate else None
@@ -2393,6 +2407,13 @@ def work_queue(desk_session: str | None = Cookie(default=None)):
                       "customer_name":row["customer_name"], "assignee_name":row["assignee_name"],
                       "assignee_id":row["assignee_id"],
                       "updated_at":row["updated_at"], "next_action":action, "priority":priority})
+    with db() as conn:
+        for item in items:
+            if item['source']=='ticket':
+                item.update(hierarchy.ticket_context(conn,conn.execute('SELECT * FROM tickets WHERE id=?',(item['id'],)).fetchone()))
+            else:
+                chat=conn.execute('SELECT * FROM chats WHERE id=?',(item['id'],)).fetchone()
+                item.update(hierarchy.company_context(conn,hierarchy.company_key(chat)))
     return sorted(items, key=lambda item: (item["priority"], -datetime.fromisoformat(item["updated_at"]).timestamp()))
 
 
@@ -2451,6 +2472,7 @@ def add_ticket_service(conn, user, data: TicketCreate):
         VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (customer_id, assignee_id, user["id"], data.title.strip(), data.description.strip(), "new", stamp, stamp,
          organization["id"] if organization else None, data.visibility, response_due, estimate_due, data.service_type))
+    hierarchy.assign_ticket(conn, cursor.lastrowid, user, sys.modules[__name__], data.project_id)
     if user["role"] != "customer":
         conn.execute("UPDATE tickets SET first_staff_response_at=? WHERE id=?", (stamp, cursor.lastrowid))
     auto_approved = False
@@ -2544,6 +2566,7 @@ def get_ticket(ticket_id: int, desk_session: str | None = Cookie(default=None)):
             except HTTPException:
                 linked = None
         item = ticket_dict(ticket)
+        item.update(hierarchy.ticket_context(conn, ticket))
         if user["role"] != "customer":
             membership = team_management.ticket_participation(conn, ticket_id, user["id"])
             item["participation"] = membership
@@ -4803,6 +4826,7 @@ def create_billing_deposit(data: BillingDepositCreate, desk_session: str | None 
             VALUES (?, ?, 'deposit', ?, ?, ?, ?, ?)
         """, (client["customer_id"], client["organization_id"], mins, amount, data.description.strip(), user["id"], stamp))
 
+        hierarchy.publish(conn,sys.modules[__name__],f"{data.client_type}:{data.client_id}",'balance_changed',f'Баланс пополнен на {fmt_hours(mins)}',user['id'])
         return {"ok": True, "new_balance_minutes": new_bal, "new_balance_rub": round(new_bal / 60.0 * rate)}
 
 
@@ -4975,6 +4999,7 @@ def create_invoice_document(data: BillingDocumentCreate, desk_session: str | Non
 
             dispatch_webhooks("act.created", {"act_id": act_id, "number": number, "total_rub": total_rub, "total_minutes": total_mins, "client_name": client["name"]})
 
+            hierarchy.publish(conn, sys.modules[__name__], f"{data.client_type}:{data.client_id}", 'act_created', f'Сформирован акт {number}', user['id'], invoice_id=act_id)
             return {"id": act_id, "number": number, "doc_type": "act", "total_rub": total_rub, "total_minutes": total_mins}
 
         else:
@@ -5000,6 +5025,7 @@ def create_invoice_document(data: BillingDocumentCreate, desk_session: str | Non
 
             dispatch_webhooks("invoice.created", {"invoice_id": inv_id, "number": number, "total_rub": total_rub, "hours": hours, "client_name": client["name"]})
 
+            hierarchy.publish(conn, sys.modules[__name__], f"{data.client_type}:{data.client_id}", 'invoice_created', f'Выставлен счёт {number}', user['id'], invoice_id=inv_id)
             return {"id": inv_id, "number": number, "doc_type": "invoice", "total_rub": total_rub, "total_minutes": total_mins}
 
 
@@ -5065,6 +5091,8 @@ def update_invoice_status(invoice_id: int, data: BillingStatusUpdate, desk_sessi
             if row['doc_type'] != 'act' or row['status'] != 'issued':
                 raise HTTPException(409, "Подписать можно только действующий акт")
             conn.execute("UPDATE invoices SET signed_at=COALESCE(signed_at,?),signed_by_id=COALESCE(signed_by_id,?) WHERE id=?", (now(),user['id'],invoice_id))
+            if not row['signed_at']:
+                hierarchy.publish(conn,sys.modules[__name__],hierarchy.company_key(row),'act_signed',f"Подписан акт {row['number']}",user['id'],invoice_id=invoice_id)
             return {"ok": True, "status": "issued", "signature_status": "signed"}
         if row['status'] == data.status:
             return {"ok": True, "status": row['status']}
@@ -5112,6 +5140,8 @@ def update_invoice_status(invoice_id: int, data: BillingStatusUpdate, desk_sessi
         else:
             conn.execute("UPDATE invoices SET status=? WHERE id=?", (new_status, invoice_id))
 
+        label={'paid':'Подтверждена оплата','cancelled':'Аннулирован документ'}.get(new_status,'Изменён документ')
+        hierarchy.publish(conn,sys.modules[__name__],hierarchy.company_key(row),'document_changed',f"{label}: {row['number']}",user['id'],invoice_id=invoice_id)
         return {"ok": True, "status": new_status}
 
 
@@ -5497,7 +5527,7 @@ def render_outbox_email(conn, job):
     if not events:
         return None
     try:
-        record = ticket_for(conn, record_id, user) if target == "ticket" else chat_for(conn, record_id, user)
+        record = ticket_for(conn, record_id, user, write=False) if target == "ticket" else chat_for(conn, record_id, user)
     except HTTPException:
         return None
     record_id = record["id"]
@@ -5518,8 +5548,10 @@ def render_outbox_email(conn, job):
     if not any(e["kind"] == "message" for e in events):
         unread = []
     events = [{**e, "text": customer_notification_text(e["text"], user)} for e in events]
-    text_lines = [heading, ""] + [f"• {e['text']}" for e in events]
-    body = "".join(f"<p style=\"margin:0 0 6px\">• {html.escape(e['text'])}</p>" for e in events)
+    context=hierarchy.ticket_context(conn,record) if target=='ticket' else hierarchy.company_context(conn,hierarchy.company_key(record))
+    parent_label=' → '.join(filter(None,[context['company_name'],context.get('project_name')]))
+    text_lines = [parent_label, heading, ""] + [f"• {e['text']}" for e in events]
+    body = f"<p style=\"color:#71748a\">{html.escape(parent_label)}</p>" + "".join(f"<p style=\"margin:0 0 6px\">• {html.escape(e['text'])}</p>" for e in events)
     for message in unread:
         message = message_dict(message, user)
         body += quote_html(f"{message['author_name']} · {format_ru_date(message['created_at']).removesuffix(' г.')}", message["body"])
@@ -5893,6 +5925,7 @@ def bootstrap_admin():
 
 
 team_management.install_routes(app, sys.modules[__name__])
+hierarchy.install_routes(app, sys.modules[__name__])
 
 from bot.service import BotEngine
 from bot.routes import install_bot_routes

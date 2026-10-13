@@ -173,5 +173,10 @@ const TeamUI = (() => {
       dialog('Участники заявки №'+tid,`<div class="form">${data().people.filter(p=>p.active).map(p=>`<label>${esc(p.name)}<select class="field" name="member_${p.id}"><option value="">Не участвует</option>${selectOptions(names,members.find(m=>m.user_id===p.id)?.participation)}</select></label>`).join('')}<p class="muted">Наблюдатель и проверяющий читают заявку. Соисполнитель может участвовать в работе при наличии права на задачи. Основной ответственный сохраняется.</p></div>`,isDispatcher()?fd=>api(`/team/tickets/${tid}/participants`,{method:'PUT',body:JSON.stringify({members:data().people.filter(p=>fd.get('member_'+p.id)).map(p=>({user_id:p.id,participation:fd.get('member_'+p.id)}))})}):null);
     }catch(e){toast(e.message,'error');}
   }
-  return {render,reset,reload,ticketParticipants};
+  async function openRecord(kind,id){
+    await reload();const record=data()[kind]?.find(r=>r.id===Number(id));
+    if(!record)throw new Error('Рабочая запись недоступна');
+    tab=kind;state.view='team';render();workDialog(kind,record);
+  }
+  return {openRecord,render,reset,reload,ticketParticipants};
 })();

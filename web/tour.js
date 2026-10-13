@@ -3,11 +3,11 @@
 const clientTour = (() => {
   const steps = [
     {title:'Добро пожаловать в Codari',text:'Здесь вы обсуждаете задачи, согласуете объём работы и проверяете результат.'},
-    {target:'#top-new-ticket',title:'Создайте обращение',text:'Выберите услугу, опишите задачу и ожидаемый результат. При необходимости приложите файлы.'},
-    {target:'.customer-ticket-list',title:'Следите за работой',text:'Заявки можно искать и фильтровать. Откройте заявку, чтобы обсудить детали и согласовать часы.'},
+    {target:'#top-new-ticket',title:'Создайте обращение',text:'Сначала выберите компанию и проект, затем опишите задачу и ожидаемый результат. При необходимости приложите файлы.'},
+    {title:'Компания → проект → заявка',text:'Компания объединяет проекты, участников, общий чат и финансы. В проекте собраны заявки и результаты. Навигационная цепочка позволяет вернуться на любой уровень.'},
     {title:'Согласование и приёмка',text:'До начала работы одобрите оценку. Когда результат готов, примите его или верните на доработку с комментарием. Общие заявки согласует владелец компании.'},
     {target:'.nav-cluster',title:'Все разделы рядом',text:'В разделе «Обращения» находятся заявки и переписка. В «Финансах» — баланс, счета и акты. В «Настройках» можно подключить мессенджеры.'},
-    {target:'[data-nav="notifications"]',title:'Следующий шаг',text:'Уведомления сообщат об ответах, новых оценках и готовом результате. Ожидающие решения также видны в списке заявок.'},
+    {target:'[data-nav="notifications"]',title:'Следующий шаг',text:'События сгруппированы по компаниям, проектам и заявкам. Фильтр «Требуют действия» показывает текущие согласования. Открытие события ведёт прямо к нужной записи.'},
     {target:'#tour-restart',title:'Начните с первой заявки',text:'Вернуться к обучению можно в любой момент. Команда уже готова помочь.',final:true},
   ];
   let active = [];
@@ -24,7 +24,7 @@ const clientTour = (() => {
 
   function start() {
     if (!state.user || state.user.role !== 'customer') return;
-    if (state.view !== 'tickets') setView('tickets');
+    if (!['companies','company','project'].includes(state.view)) setView('companies');
     active = steps.filter(step => !step.target || target(step));
     index = 0;
     returnFocus = document.activeElement;
@@ -44,7 +44,7 @@ const clientTour = (() => {
     root.querySelector('#tour-next').onclick = () => {
       if (!active[index].final) return go(index + 1);
       finish();
-      document.querySelector('#new-ticket')?.click();
+      HierarchyUI.fromView();
     };
     root.addEventListener('keydown', onKey);
     window.addEventListener('resize', schedule);

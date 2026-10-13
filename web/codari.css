@@ -222,6 +222,84 @@ h2 { font-size:16px; font-weight:600; letter-spacing:-.01em; }
 .table-scroll {position:relative}
 .visually-hidden {left:0;top:0}
 .billing-close-period {background:var(--accent-soft);color:var(--ink)}
+.hierarchy-layout {display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:24px;align-items:start}
+.hierarchy-context .panel {margin-bottom:18px}
+.hierarchy-actions {display:flex;flex-direction:column;align-items:stretch;gap:10px;margin-top:20px}
+.hierarchy-actions .button {justify-content:flex-start;text-align:left}
+.company-line,.project-line,.project-ticket-line {display:grid;gap:22px;width:100%;text-align:left;color:var(--ink);font:inherit;border:0;border-bottom:1px solid var(--line-light);background:var(--card);padding:22px 24px;align-items:center;cursor:pointer}
+.company-line {grid-template-columns:minmax(0,1fr) 110px 140px 90px}
+.project-line {grid-template-columns:minmax(0,1fr) 95px 125px 110px 18px}
+.project-ticket-line {grid-template-columns:55px minmax(0,1fr) 130px 80px}
+.company-line:last-child,.project-line:last-child,.project-ticket-line:last-child {border-bottom:0}
+.company-line:hover,.project-line:hover,.project-ticket-line:hover {background:var(--row-active)}
+.company-line strong,.project-line strong,.project-ticket-line strong {display:block;font-size:14px;font-weight:600;overflow-wrap:anywhere}
+.company-line small,.project-line small,.project-ticket-line small {display:block;font-size:11px;color:var(--muted);margin-top:5px;line-height:1.6;overflow-wrap:anywhere}
+.company-ident,.project-ident {display:flex;gap:14px;align-items:center;min-width:0}
+.company-symbol {display:grid;place-items:center;width:42px;height:42px;flex-shrink:0;background:var(--accent-soft);color:var(--accent-ink);border-radius:8px}
+.company-open {display:flex;gap:6px;color:var(--accent-ink);font-size:11px}
+.project-ident>svg {flex-shrink:0;color:var(--accent-ink)}
+.project-company-label {padding:16px 24px 0;font-size:11px;color:var(--muted);background:var(--surface-soft)}
+.project-summary {display:flex;gap:20px;flex-wrap:wrap;align-items:center;margin-bottom:24px;font-size:12px;color:var(--ink-secondary)}
+.project-description {white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px;max-width:900px;margin:0 0 26px;line-height:1.8}
+.hierarchy-filters {display:flex;gap:16px;flex-wrap:wrap;align-items:end}
+.hierarchy-filters label {display:flex;flex-direction:column;gap:6px;font-size:11px;color:var(--muted);min-width:180px;max-width:340px;flex:1}
+.hierarchy-filters select {width:100%;min-width:0;color:var(--ink);min-height:40px}
+.hierarchy-form-scope {border:1px solid var(--accent-line,var(--line));background:var(--surface-soft);border-radius:8px;padding:20px;margin:0 0 12px;min-width:0}
+.hierarchy-form-scope legend {font-size:13px;font-weight:600;padding:0 8px;color:var(--accent-ink)}
+.hierarchy-form-fields {display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:14px}
+.hierarchy-form-fields label {min-width:0}
+.hierarchy-form-scope .row small {flex:1;line-height:1.6}
+.hierarchy-dialog .team-dialog-body {display:flex;flex-direction:column;gap:18px}
+.ticket-project-context h2 {margin-top:12px;overflow-wrap:anywhere}
+.ticket-project-context .hierarchy-actions {margin-top:12px}
+.activity-toolbar {display:flex;flex-direction:column;gap:18px;margin-bottom:24px}
+.activity-toolbar>.hierarchy-filters {max-width:740px}
+.activity-company {margin:0 0 24px}
+.activity-company-head {display:flex;justify-content:space-between;align-items:center;gap:18px;padding:20px 24px;border-bottom:1px solid var(--line);background:var(--surface-soft)}
+.activity-company-head h2 {margin:5px 0 0;font-size:18px;overflow-wrap:anywhere}
+.activity-project {padding:20px 24px 8px}
+.activity-project+.activity-project {border-top:1px solid var(--line)}
+.activity-project h3 {font-size:13px;font-weight:600;color:var(--ink-secondary);margin:0 0 10px}
+.activity-object {border-top:1px solid var(--line-light)}
+.activity-open {display:flex;align-items:center;gap:16px;padding:18px 0;width:100%;text-align:left;border:0;background:transparent;color:var(--ink);font:inherit;cursor:pointer}
+.activity-open>span:nth-child(2) {flex:1;min-width:0}
+.activity-open strong {display:block;font-size:13px;font-weight:600;overflow-wrap:anywhere}
+.activity-text {display:block;font-size:12px;color:var(--ink-secondary);margin:5px 0;overflow-wrap:anywhere}
+.activity-open small {display:block;color:var(--muted);font-size:10px}
+.activity-dot {width:7px;height:7px;background:var(--line-strong);border-radius:50%;flex-shrink:0}
+.activity-object.unread .activity-dot {background:var(--accent)}
+.activity-history {margin:0 0 16px 23px;font-size:11px;color:var(--muted)}
+.activity-history summary {cursor:pointer}
+.activity-history p {border-left:2px solid var(--line);padding-left:12px;color:var(--ink-secondary);line-height:1.7}
+.activity-history small {display:block;color:var(--muted)}
+.invoice-item {display:flex;align-items:start;justify-content:space-between;gap:24px;padding:16px 0;border-top:1px solid var(--line);font-size:13px}
+.invoice-item span {min-width:0;overflow-wrap:anywhere}
+.invoice-item strong {flex-shrink:0}
+@media(max-width:1100px) {.hierarchy-layout {grid-template-columns:1fr}.hierarchy-context .hierarchy-actions {flex-direction:row;flex-wrap:wrap}}
+@media(max-width:760px) {
+  .company-line {grid-template-columns:minmax(0,1fr) 90px;gap:16px;padding:18px}
+  .company-line>.company-ident {grid-column:1/-1}
+  .company-line>.company-open {display:none}
+  .project-line {grid-template-columns:minmax(0,1fr) 90px;gap:14px;padding:18px}
+  .project-line>.project-ident {grid-column:1/-1}
+  .project-line>span:nth-child(4),.project-line>svg {display:none}
+  .project-ticket-line {grid-template-columns:45px minmax(0,1fr);gap:12px;padding:18px}
+  .project-ticket-line>.badge {grid-column:2;justify-self:start}
+  .project-ticket-line>span:last-child {grid-column:1;grid-row:2;font-size:11px}
+  .hierarchy-form-fields {grid-template-columns:1fr}
+  .hierarchy-form-scope {padding:16px}
+  .hierarchy-filters {gap:12px}
+  .hierarchy-filters label {min-width:0;max-width:none;width:100%;flex-basis:100%}
+  .activity-company-head {padding:16px;align-items:start}
+  .activity-company-head h2 {font-size:16px}
+  .activity-company-head .button {font-size:10px;padding:8px}
+  .activity-project {padding:16px}
+  .activity-open {display:grid;grid-template-columns:7px minmax(0,1fr);gap:10px 12px;align-items:start}
+  .activity-open>.badge,.activity-open>.muted {grid-column:2;justify-self:start}
+  .activity-dot {margin-top:7px}
+  .activity-history {margin-left:19px}
+  .project-summary {gap:12px}
+}
 .focus-panel {background:var(--accent-soft);color:var(--ink);border:1px solid var(--line);border-radius:10px}
 .focus-panel h2,.focus-panel p,.focus-panel .focus-overline {color:var(--ink-secondary)}
 .focus-panel .button.on-dark {background:var(--card);color:var(--accent-ink);border:1px solid var(--line)}

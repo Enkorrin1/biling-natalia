@@ -34,6 +34,8 @@ def init_schema(conn):
     columns = {r[1] for r in conn.execute('PRAGMA table_info(tickets)')}
     if 'project_id' not in columns:
         conn.execute('ALTER TABLE tickets ADD COLUMN project_id INTEGER REFERENCES client_projects(id) ON DELETE SET NULL')
+    if 'related_ticket_id' not in {r[1] for r in conn.execute('PRAGMA table_info(chat_notifications)')}:
+        conn.execute('ALTER TABLE chat_notifications ADD COLUMN related_ticket_id INTEGER REFERENCES tickets(id) ON DELETE SET NULL')
     conn.execute('CREATE INDEX IF NOT EXISTS idx_tickets_project ON tickets(project_id,status)')
     conn.execute('CREATE INDEX IF NOT EXISTS idx_hierarchy_events_user ON hierarchy_events(user_id,read_at,id)')
     # Only unlinked records are migrated; user-chosen projects survive every restart.
@@ -78,6 +80,10 @@ def company_context(conn, key):
 
 def can_company(conn, user, key, domain, write=False):
     ctx = company_context(conn, key)
+    # New requests use the customer's current company; a former personal account
+    # remains available for history and documents after joining an organization.
+    if write and ctx['client_type']=='user' and conn.execute('SELECT 1 FROM organization_members WHERE user_id=?',(ctx['client_id'],)).fetchone():
+        return False
     if user['role'] == 'customer':
         if ctx['client_type'] == 'user':
             return ctx['client_id'] == user['id']
@@ -107,6 +113,19 @@ def project_for(conn, user, pid, domain, write=False):
     return row
 
 
+def manages_company(conn, user, key, domain):
+    """Project lifecycle is controlled by the owner/coordinator, not a reader."""
+    ctx = company_context(conn, key)
+    if ctx['client_type']=='user' and conn.execute('SELECT 1 FROM organization_members WHERE user_id=?',(ctx['client_id'],)).fetchone():
+        return False
+    if user['role'] == 'customer':
+        if ctx['client_type'] == 'user':
+            return ctx['client_id'] == user['id']
+        return bool(conn.execute("SELECT 1 FROM organization_members WHERE organization_id=? AND user_id=? AND role='owner'", (ctx['client_id'],user['id'])).fetchone())
+    return domain.team_management.privileged(user) or (
+        domain.team_management.has_permission(conn,user,'clients') and can_company(conn,user,key,domain))
+
+
 def ticket_context(conn, ticket):
     item = dict(ticket)
     key = company_key(ticket)
@@ -128,6 +147,8 @@ def assign_ticket(conn, ticket_id, user, domain, project_id=None):
         if company_key(project) != company_key(ticket):
             raise HTTPException(422, 'Проект должен принадлежать компании выбранного заказчика')
         pid = project['id']
+    if conn.execute('SELECT state FROM client_projects WHERE id=?',(pid,)).fetchone()['state']!='active':
+        raise HTTPException(409,'Проект не активен. Выберите активный проект')
     conn.execute('UPDATE tickets SET project_id=? WHERE id=?', (pid, ticket_id))
     return pid
 
@@ -148,7 +169,7 @@ def project_data(conn, row, user, domain):
             'ticket_count': len(tickets), 'open_count': sum(t['status'] != 'closed' for t in tickets),
             'approved_minutes': sum(domain.approved_minutes(conn, t['id']) for t in tickets),
             'actual_minutes': sum(domain.actual_minutes(conn, t['id']) for t in tickets),
-            'can_manage': domain.team_management.privileged(user) or can_company(conn, user, company_key(row), domain, True),
+            'can_manage': manages_company(conn, user, company_key(row), domain),
             'can_create_ticket': row['state'] == 'active' and can_company(conn, user, company_key(row), domain, True)}
 
 
@@ -159,6 +180,9 @@ def publish(conn, domain, key, kind, text, actor_id, project_id=None, invoice_id
         recipients.update(r[0] for r in conn.execute('SELECT user_id FROM organization_members WHERE organization_id=?', (ctx['client_id'],)))
     else:
         recipients.add(ctx['client_id'])
+    if project_id:
+        recipients.update(r[0] for r in conn.execute('SELECT assignee_id FROM tickets WHERE project_id=? AND assignee_id IS NOT NULL',(project_id,)))
+        recipients.update(r[0] for r in conn.execute('SELECT p.user_id FROM ticket_participants p JOIN tickets t ON t.id=p.ticket_id WHERE t.project_id=?',(project_id,)))
     for uid in recipients - {actor_id}:
         conn.execute('''INSERT INTO hierarchy_events(user_id,project_id,organization_id,customer_id,invoice_id,kind,text,created_at)
             VALUES(?,?,?,?,?,?,?,?)''', (uid,project_id,ctx['organization_id'],ctx['customer_id'],invoice_id,kind,text,domain.now()))
@@ -193,7 +217,7 @@ def inbox(conn, user, domain):
             ticket = domain.ticket_for(conn, row['ticket_id'], user, write=False)
             ctx = ticket_context(conn, ticket)
             estimate = domain.latest_estimate(conn, ticket['id'])
-            action = bool(domain.customer_can_decide(conn,ticket,user) and (ticket['status']=='done' or estimate and estimate['state']=='pending' or conn.execute("SELECT 1 FROM hour_requests WHERE ticket_id=? AND state='pending'", (ticket['id'],)).fetchone())) if user['role']=='customer' else bool(ticket['assignee_id']==user['id'] and ticket['status'] not in ('done','closed'))
+            action = bool(ticket['status']!='closed' and domain.customer_can_decide(conn,ticket,user) and (ticket['status']=='done' or estimate and estimate['state']=='pending' or conn.execute("SELECT 1 FROM hour_requests WHERE ticket_id=? AND state='pending'", (ticket['id'],)).fetchone())) if user['role']=='customer' else bool(ticket['assignee_id']==user['id'] and ticket['status'] not in ('done','closed'))
             items.append({**dict(row), **ctx, 'target':'ticket','record_id':ticket['id'],
                           'event_key':f"ticket:{row['id']}",'text':domain.customer_notification_text(row['text'],user), 'requires_action':action})
         except HTTPException:
@@ -202,8 +226,17 @@ def inbox(conn, user, domain):
         try:
             chat = domain.chat_for(conn,row['chat_id'],user)
             ctx = company_context(conn, company_key(chat))
-            items.append({**dict(row),**ctx,'project_id':None,'project_name':None,'target':'chat','record_id':chat['id'],
-                          'event_key':f"chat:{row['id']}",'target_url':f"/#chat/{chat['id']}",'text':domain.customer_notification_text(row['text'],user),'requires_action':False})
+            ctx.update(project_id=None,project_name=None)
+            target,rid,url='chat',chat['id'],f"/#chat/{chat['id']}"
+            if row['related_ticket_id']:
+                try:
+                    related=domain.ticket_for(conn,row['related_ticket_id'],user,write=False)
+                    ctx.update(ticket_context(conn,related))
+                    target,rid,url='ticket',related['id'],f"/#ticket/{related['id']}"
+                except HTTPException:
+                    pass
+            items.append({**dict(row),**ctx,'target':target,'record_id':rid,
+                          'event_key':f"chat:{row['id']}",'target_url':url,'text':domain.customer_notification_text(row['text'],user),'requires_action':False})
         except HTTPException:
             continue
     if user['role'] != 'customer':
@@ -222,15 +255,16 @@ def inbox(conn, user, domain):
                         ctx = ticket_context(conn,domain.ticket_for(conn,record['ticket_id'],user,write=False))
                     except HTTPException:
                         pass
+                action=(record['status'] not in ('done','cancelled') and user['id'] in (record['owner_id'],record['reviewer_id'])) if kind=='tasks' else (record['stage'] not in ('won','lost') and record['owner_id']==user['id']) if kind=='deals' else record['status']=='planned'
                 items.append({**dict(row),**ctx,'target':kind,'record_id':record['id'],'event_key':f"team:{row['id']}",
                               'text':record['title'],'kind':dict(row).get('event_kind') or 'assignment',
-                              'target_url':f"/#task/{record['id']}" if kind=='tasks' else f"/#team/{kind}/{record['id']}",'requires_action':True})
+                              'target_url':f"/#task/{record['id']}" if kind=='tasks' else f"/#team/{kind}/{record['id']}",'requires_action':bool(action)})
             except HTTPException:
                 continue
     for row in conn.execute('SELECT * FROM hierarchy_events WHERE user_id=? ORDER BY id DESC',(user['id'],)):
         try:
             ctx = company_context(conn,company_key(row))
-            if not can_company(conn,user,ctx['company_key'],domain):
+            if not row['project_id'] and not can_company(conn,user,ctx['company_key'],domain):
                 continue
             target, rid, url = 'company',ctx['company_key'],f"/#company/{ctx['company_key']}"
             if row['project_id']:
@@ -241,7 +275,11 @@ def inbox(conn, user, domain):
                 if user['role']!='customer':
                     domain.require_finance(user)
                 target,rid,url='invoice',row['invoice_id'],f"/#invoice/{row['invoice_id']}"
-            items.append({**dict(row),**ctx,'target':target,'record_id':rid,'event_key':f"workspace:{row['id']}",'target_url':url,'requires_action':False})
+            action=False
+            if target=='invoice':
+                doc=conn.execute('SELECT doc_type,status FROM invoices WHERE id=?',(rid,)).fetchone()
+                action=bool(user['role']=='customer' and doc and doc['doc_type']=='invoice' and doc['status']=='issued')
+            items.append({**dict(row),**ctx,'target':target,'record_id':rid,'event_key':f"workspace:{row['id']}",'target_url':url,'requires_action':action})
         except HTTPException:
             continue
     return sorted(items,key=lambda r:(r['created_at'],r['event_key']),reverse=True)
@@ -255,17 +293,23 @@ def install_routes(app, domain):
         user = domain.current_user(desk_session)
         with domain.db() as conn:
             keys = [f"org:{r[0]}" for r in conn.execute('SELECT id FROM organizations')]
-            keys += [f"user:{r[0]}" for r in conn.execute("SELECT u.id FROM users u WHERE role='customer' AND (NOT EXISTS(SELECT 1 FROM organization_members m WHERE m.user_id=u.id) OR EXISTS(SELECT 1 FROM tickets t WHERE t.customer_id=u.id AND t.organization_id IS NULL) OR EXISTS(SELECT 1 FROM client_projects p WHERE p.customer_id=u.id))")]
+            keys += [f"user:{r[0]}" for r in conn.execute("SELECT u.id FROM users u WHERE role='customer' AND (NOT EXISTS(SELECT 1 FROM organization_members m WHERE m.user_id=u.id) OR EXISTS(SELECT 1 FROM tickets t WHERE t.customer_id=u.id AND t.organization_id IS NULL) OR EXISTS(SELECT 1 FROM client_projects p WHERE p.customer_id=u.id) OR EXISTS(SELECT 1 FROM invoices i WHERE i.customer_id=u.id AND i.organization_id IS NULL) OR EXISTS(SELECT 1 FROM billing_transactions b WHERE b.customer_id=u.id AND b.organization_id IS NULL))")]
             result = []
             for key in keys:
-                if not can_company(conn,user,key,domain):
-                    continue
                 ctx = company_context(conn,key)
                 rows = conn.execute('SELECT * FROM client_projects WHERE organization_id=?' if ctx['client_type']=='org' else 'SELECT * FROM client_projects WHERE customer_id=?',(ctx['client_id'],)).fetchall()
-                projects = [project_data(conn,p,user,domain) for p in rows]
+                projects = []
+                for p in rows:
+                    try:
+                        project_for(conn,user,p['id'],domain)
+                        projects.append(project_data(conn,p,user,domain))
+                    except HTTPException:
+                        continue
+                if not projects and not can_company(conn,user,key,domain):
+                    continue
                 result.append({**ctx,'projects':projects,'project_count':len(projects),
                                'open_count':sum(p['open_count'] for p in projects),
-                               'can_create_project':can_company(conn,user,key,domain,True)})
+                               'can_create_project':manages_company(conn,user,key,domain), 'can_create_ticket':can_company(conn,user,key,domain,True)})
             return sorted(result,key=lambda c:c['company_name'].casefold())
 
     @router.get('/projects')
@@ -283,6 +327,40 @@ def install_routes(app, domain):
                     pass
             return result
 
+    @router.get('/companies/{kind}/{cid}/billing')
+    def company_billing(kind: str, cid: int, desk_session: str | None = Cookie(default=None)):
+        user = domain.current_user(desk_session)
+        if not domain.billing_enabled():
+            raise HTTPException(404, 'Биллинг отключён')
+        with domain.db() as conn:
+            key = f'{kind}:{cid}'
+            company_context(conn, key)
+            if not can_company(conn, user, key, domain):
+                raise HTTPException(404, 'Компания недоступна')
+            if user['role'] != 'customer':
+                domain.require_finance(user)
+            client = domain.get_client_billing_info(conn, kind, cid)
+            cond, params = domain.client_condition(kind, cid)
+            active = conn.execute(f"SELECT id FROM tickets WHERE {cond} AND status IN ('new','working','waiting')", params).fetchall()
+            unbilled = conn.execute(f"SELECT id FROM tickets WHERE {cond} AND status IN ('done','closed') AND act_invoice_id IS NULL", params).fetchall()
+            in_progress = sum(domain.approved_minutes(conn, t['id']) for t in active)
+            service_minutes = domain.unbilled_service_minutes(conn, kind, cid)
+            unbilled_minutes = sum(domain.approved_minutes(conn, t['id']) for t in unbilled) + service_minutes
+            rate = client['hourly_rate_rub']
+            client.update(balance_rub=round(client['balance_minutes']/60*rate),
+                          in_progress_minutes=in_progress, in_progress_rub=round(in_progress/60*rate),
+                          unbilled_minutes=unbilled_minutes, unbilled_rub=round(unbilled_minutes/60*rate),
+                          unbilled_service_minutes=service_minutes,
+                          open_tickets=conn.execute(f"SELECT COUNT(*) FROM tickets WHERE {cond} AND status!='closed'", params).fetchone()[0])
+            docs = [dict(r) | {'client_name':client['name']} for r in conn.execute(f'SELECT * FROM invoices WHERE {cond} ORDER BY id DESC LIMIT 50', params)]
+            transactions = [dict(r) | {'client_name':client['name']} for r in conn.execute(f'SELECT * FROM billing_transactions WHERE {cond} ORDER BY id DESC LIMIT 50', params)]
+            result = {**client, 'role':user['role'], 'company_key':key, 'invoices':docs, 'transactions':transactions}
+            if user['role'] != 'customer':
+                services = [dict(r) for r in conn.execute(f'SELECT * FROM service_entries WHERE {cond} ORDER BY id DESC LIMIT 100', params)]
+                paid = conn.execute(f"SELECT COALESCE(SUM(total_rub),0) FROM invoices WHERE {cond} AND doc_type='invoice' AND status='paid' AND substr(paid_at,1,7)=?", (*params,domain.now()[:7])).fetchone()[0]
+                result.update(clients=[client],service_entries=services,total_paid_rub=paid,total_active_minutes=in_progress)
+            return result
+
     @router.post('/projects', status_code=201)
     def create_project(data: ProjectCreate, desk_session: str | None = Cookie(default=None)):
         user = domain.current_user(desk_session)
@@ -292,7 +370,7 @@ def install_routes(app, domain):
         with domain.db() as conn:
             conn.execute('BEGIN IMMEDIATE')
             ctx = company_context(conn,data.company_key)
-            if not can_company(conn,user,data.company_key,domain,True):
+            if not manages_company(conn,user,data.company_key,domain):
                 raise HTTPException(403,'Нет права создавать проекты компании')
             duplicate = conn.execute('SELECT 1 FROM client_projects WHERE COALESCE(organization_id,0)=? AND COALESCE(customer_id,0)=? AND lower(name)=lower(?) AND state!=\'archived\'',(ctx['organization_id'] or 0,ctx['customer_id'] or 0,name)).fetchone()
             if duplicate:
@@ -319,11 +397,15 @@ def install_routes(app, domain):
         user=domain.current_user(desk_session)
         with domain.db() as conn:
             conn.execute('BEGIN IMMEDIATE')
-            row=project_for(conn,user,pid,domain,True)
+            row=project_for(conn,user,pid,domain)
+            if not manages_company(conn,user,company_key(row),domain):
+                raise HTTPException(403,'Проектом управляет владелец компании или координатор')
             if row['updated_at']!=data.version:
                 raise HTTPException(409,'Проект изменён другим пользователем. Обновите страницу')
             if len(data.name.strip())<2:
                 raise HTTPException(422,'Укажите название проекта')
+            if conn.execute("SELECT 1 FROM client_projects WHERE id!=? AND COALESCE(organization_id,0)=? AND COALESCE(customer_id,0)=? AND lower(name)=lower(?) AND state!='archived'",(pid,row['organization_id'] or 0,row['customer_id'] or 0,data.name.strip())).fetchone():
+                raise HTTPException(409,'В компании уже есть проект с таким названием')
             if data.state=='completed' and conn.execute("SELECT 1 FROM tickets WHERE project_id=? AND status!='closed'",(pid,)).fetchone():
                 raise HTTPException(409,'Сначала закройте все заявки проекта и получите приёмку')
             conn.execute('UPDATE client_projects SET name=?,description=?,state=?,updated_at=? WHERE id=?',(data.name.strip(),data.description.strip(),data.state,domain.now(),pid))
@@ -342,7 +424,7 @@ def install_routes(app, domain):
                 return dict(ticket)
             assign_ticket(conn,tid,user,domain,data.project_id)
             conn.execute('INSERT INTO ticket_events(ticket_id,actor_id,kind,old_value,new_value,created_at) VALUES(?,?,?,?,?,?)',(tid,user['id'],'project_changed',str(ticket['project_id']),str(data.project_id),domain.now()))
-            for uid in domain.customer_recipients(conn,ticket):
+            for uid in set(domain.customer_recipients(conn,ticket)) | {ticket['assignee_id']} - {None}:
                 if uid!=user['id']:
                     domain.notify(conn,uid,tid,'project_changed',f'Заявка №{tid} перенесена в другой проект')
             return dict(domain.ticket_for(conn,tid,user,write=False))

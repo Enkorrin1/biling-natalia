@@ -1,5 +1,6 @@
 const app = document.querySelector('#app');
 const state = { user: null, profile: null, tickets: [], chats: [], queue: [], staff: [], customers: [], organizations: [], notifications: [], current: null, currentChat: null, view: 'tickets', filter: 'all', search: '', authMode: 'login', error: '', internalNotes: [], cannedResponses: [], analytics: null, kbCategories: [], kbArticles: [], kbActiveCategory: null, kbSearch: '', kbReadingArticle: null, kbEditingArticle: null, gitLinks: [], webhooks: [], billing: null, billingTab: 'docs', billingFilter: 'all', billingModal: null, owner: 'all', queueScope: 'all', queueSource: 'all', queueGroup: null, detailTab: 'messages', chatSearch: '', waiting: [], replyTo: null };
+Object.assign(state,{companies:[],projects:[],companyKey:null,projectId:null,projectDetail:null,invoiceDetail:null,newTicketContext:null,projectStatusFilter:'active',noticeFilter:'unread',noticeCompany:'',noticeProject:'',ticketCompanyFilter:'',ticketProjectFilter:''});
 const statusNames = { new: 'Новая', working: 'В работе', waiting: 'Ожидает заказчика', done: 'На проверке', closed: 'Закрыта' };
 const teamRoleNames = {programmer:'Программист',integrator:'Интегратор',devops:'Девопс',analyst:'Аналитик',designer:'Дизайнер',qa:'Тестировщик',sales:'Продажи',account:'Ведение клиентов',call_host:'Проведение созвонов',support:'Поддержка',project_manager:'Управление проектами',team_lead:'Руководство командой',finance:'Финансовый учёт'};
 const staffLabel = person => `${person.name}${(person.functions||[person.team_role]).filter(Boolean).length?' · '+(person.functions||[person.team_role]).filter(Boolean).map(c=>state.teamWorkspace?.functions.find(f=>f.code===c)?.name||teamRoleNames[c]||c).join(', '):''}`;
@@ -114,6 +115,7 @@ function openPalette() {
   ].map(item => ({ ...item, hay: item.label.toLocaleLowerCase('ru-RU') }));
   const tickets = state.tickets.slice().sort((a, b) => b.updated_at.localeCompare(a.updated_at)).map(t => ({ group: 'Заявки', svg: icon('ticket'), label: `№${t.id} · ${t.title}`, hint: statusNames[t.status], run: () => openTicket(t.id), hay: [t.id, t.title, t.customer_name, t.customer_company].join(' ').toLocaleLowerCase('ru-RU') }));
   const tasks = staff ? (state.teamWorkspace?.tasks||[]).map(t=>({group:'Задачи',svg:icon('check'),label:`№${t.id} · ${t.title}`,hint:({new:'Новая',working:'В работе',review:'На проверке',done:'Выполнена',cancelled:'В архиве'})[t.status],run:()=>TasksUI.open(t.id),hay:[t.id,t.title,t.description].join(' ').toLocaleLowerCase('ru-RU')})):[];
+  const scopes=[...(state.companies||[]).map(c=>({group:'Компании',svg:icon('user'),label:c.company_name,run:()=>HierarchyUI.openCompany(c.company_key),hay:c.company_name.toLocaleLowerCase('ru-RU')})),...(state.projects||[]).map(p=>({group:'Проекты',svg:icon('ticket'),label:p.name,hint:p.company_name,run:()=>HierarchyUI.openProject(p.id),hay:[p.name,p.company_name,p.description].join(' ').toLocaleLowerCase('ru-RU')}))];
   const chats = staff ? state.chats.map(c => ({ group: 'Чаты', svg: icon('chat'), label: c.customer_name, hint: c.last_message || '', run: () => openChat(c.id), hay: [c.customer_name, c.last_message].join(' ').toLocaleLowerCase('ru-RU') })) : [];
   document.body.insertAdjacentHTML('beforeend', `<div class="palette-backdrop"><div class="palette" role="dialog" aria-modal="true" aria-label="Быстрый переход"><div class="palette-search">${icon('search', 18)}<input id="palette-input" role="combobox" aria-expanded="true" aria-controls="palette-list" aria-autocomplete="list" autocomplete="off" placeholder="Найти задачу, заявку или раздел…"><kbd>Esc</kbd></div><div class="palette-list" id="palette-list" role="listbox" aria-label="Результаты"></div><div class="palette-foot"><span><kbd>↑</kbd><kbd>↓</kbd> выбрать</span><span><kbd>Enter</kbd> открыть</span><span><kbd>Esc</kbd> закрыть</span></div></div></div>`);
   const backdrop = document.querySelector('.palette-backdrop');
@@ -132,8 +134,8 @@ function openPalette() {
   const search = () => {
     const q = input.value.trim().toLocaleLowerCase('ru-RU');
     const match = item => !q || item.hay.includes(q);
-    results = [...pages.filter(match).slice(0, q ? 6 : 8), ...tickets.filter(match).slice(0, q ? 6 : 5), ...chats.filter(match).slice(0, q ? 4 : 0)];
-    if (q) results.push({ group: 'Поиск', svg: icon('search'), label: `Искать «${input.value.trim()}» во всех заявках`, run: () => { state.search = input.value.trim(); state.filter = 'all'; state.owner = 'all'; setView('tickets'); } });
+    results = [...pages.filter(match).slice(0, q ? 6 : 8), ...scopes.filter(match).slice(0,q?6:0), ...tasks.filter(match).slice(0,q?5:0), ...tickets.filter(match).slice(0, q ? 6 : 5), ...chats.filter(match).slice(0, q ? 4 : 0)];
+    if (q) results.push({ group: 'Поиск', svg: icon('search'), label: `Искать «${input.value.trim()}» во всех заявках`, run: () => { state.search = input.value.trim(); state.filter = 'all'; state.owner = 'all'; state.ticketCompanyFilter='';state.ticketProjectFilter='';setView('tickets'); } });
     active = 0;
     paint();
   };
@@ -474,6 +476,7 @@ function initRealtime() {
     eventSource.addEventListener('update', async (e) => {
       try {
         const data = JSON.parse(e.data);
+        if(data.type==='activity_read'){await loadNotifications();return;}
         if(data.type==='team_updated'){if(!document.querySelector('#team-dialog'))await TeamUI.reload();return;}
         if (data.type === 'read') {
           const current = data.target === 'ticket' ? (state.view === 'detail' && state.current?.ticket.id === data.record_id ? state.current : null) : (state.view === 'chat' && state.currentChat?.chat.id === data.record_id ? state.currentChat : null);
@@ -490,6 +493,7 @@ function initRealtime() {
           if (!state.pushEnabled) showBrowserNotification('Codari · Новое уведомление', data.text);
           toast(data.text, 'info');
           await loadNotifications();
+          if(['company','project','companies','projects'].includes(state.view)){await HierarchyUI.reloadData();if(state.view==='project')await HierarchyUI.openProject(state.projectId);else render();}
         } else if (data.type === 'ticket_message') {
           if (state.view === 'detail' && state.current && state.current.ticket.id === data.ticket_id) {
             const textarea = document.querySelector('#message-form textarea');
@@ -550,30 +554,30 @@ function showError(error) {
 }
 function syncRoute(){
   if(!state.user||state.user.must_change_credentials||state.restoringRoute)return;
-  const route=state.view==='detail'?`ticket/${state.current?.ticket.id}`:state.view==='chat'?`chat/${state.currentChat?.chat.id}`:state.view==='task'?`task/${state.currentTaskId}`:state.view;
+  const route=state.view==='detail'?`ticket/${state.current?.ticket.id}`:state.view==='chat'?`chat/${state.currentChat?.chat.id}`:state.view==='task'?`task/${state.currentTaskId}`:state.view==='company'?`company/${state.companyKey}`:state.view==='project'?`project/${state.projectId}`:state.view==='invoice'?`invoice/${state.invoiceDetail?.id}`:state.view==='billing'&&state.billingScope?`company/${state.billingScope}/billing`:state.view;
   if(route&&!route.includes('undefined')&&location.hash!==`#${route}`)history.pushState(null,'',`#${route}`);
 }
 document.addEventListener('submit',event=>{event.target.querySelectorAll('button:not(:disabled)').forEach(button=>{button.dataset.submitBusy='true';});},true);
 document.addEventListener('click',event=>{const button=event.target.closest('button');if(button&&!button.disabled)button.dataset.submitBusy='true';},true);
 function setView(view) { state.view=view; state.error=''; syncRoute(); render(); }
 async function fetchNotifications() {
-  const [tickets, chats] = await Promise.all([api('/notifications'), api('/chat-notifications')]);
-  return [...tickets.map(n=>({...n,target:'ticket'})), ...chats.map(n=>({...n,target:'chat'}))].sort((a,b)=>b.created_at.localeCompare(a.created_at));
+  const result=await api('/activity');state.activityUnread=result.unread_total;return result.items;
 }
+
 async function loadNotifications() {
   if (!state.user) return;
   const incoming = await fetchNotifications();
   const changed = JSON.stringify(incoming) !== JSON.stringify(state.notifications);
   state.notifications = incoming;
-  const unread = state.notifications.filter(n=>!n.read_at).length+(state.user.role!=='customer'?new Set((state.teamWorkspace?.events||[]).filter(e=>e.entity==='tasks'&&!e.read_at).map(e=>e.entity_id)).size:0);
+  const unread = state.notifications.filter(n=>!n.read_at).length;
   const count = document.querySelector('#notification-count');
   const previous = Number(count?.textContent || 0);
-  if (count) count.textContent = unread ? String(unread) : '';
+  if (count) {count.textContent = unread ? String(unread) : '';count.closest('button')?.setAttribute('aria-label',unread?`Уведомления: ${unread} новых`:'Уведомления');}
   if (count && unread > previous) { count.classList.remove('bump'); void count.offsetWidth; count.classList.add('bump'); }
   if (changed && state.view === 'notifications') renderNotifications();
 }
 function resetAccountState() {
-  TasksUI.reset();state.currentTaskId=null;TeamUI.reset();state.teamWorkspace=null;
+  TasksUI.reset();state.currentTaskId=null;TeamUI.reset();state.teamWorkspace=null;state.companies=[];state.projects=[];state.companyKey=null;state.projectId=null;state.projectDetail=null;state.invoiceDetail=null;state.newTicketContext=null;state.billingScope='';state.billingClients=[];state.activityUnread=0;state.companySearch='';state.projectCompanyFilter='';state.projectStatusFilter='active';state.noticeFilter='unread';state.noticeCompany='';state.noticeProject='';state.ticketCompanyFilter='';state.ticketProjectFilter='';
   for (const key of ['tickets','chats','queue','staff','customers','organizations','notifications','internalNotes','cannedResponses','kbCategories','kbArticles','gitLinks','webhooks','waiting']) state[key]=[];
   for (const key of ['profile','current','currentChat','analytics','billing','bots','settings','kbReadingArticle','kbEditingArticle','replyTo']) state[key]=null;
   state.pairings={};state.pendingOps={};state.loadFailures=[];state.readSent={};
@@ -582,7 +586,7 @@ async function refresh() {
   const accountId=state.user?.id;
   if(state.user?.must_change_credentials)return renderCredentials();
   const staff=state.user.role!=='customer';
-  const requests={tickets:()=>api('/tickets'),chats:()=>api('/chats'),organizations:()=>api('/organizations'),profile:()=>api(staff?'/profile/me':'/customer-profile/me'),notifications:fetchNotifications,settings:()=>api('/public/settings')};
+  const requests={tickets:()=>api('/tickets'),chats:()=>api('/chats'),organizations:()=>api('/organizations'),profile:()=>api(staff?'/profile/me':'/customer-profile/me'),notifications:fetchNotifications,settings:()=>api('/public/settings'),companies:()=>api('/companies'),projects:()=>api('/projects')};
   if(staff)Object.assign(requests,{staff:()=>api('/staff'),customers:()=>api('/customers'),queue:()=>api('/work-queue'),teamWorkspace:()=>api('/team')});
   else requests.waiting=()=>api('/waiting-on-me');
   const keys=Object.keys(requests);const results=await Promise.allSettled(keys.map(key=>requests[key]()));
@@ -657,7 +661,8 @@ function shell(title, action, body, opts = {}) {
   const admin = state.user.role === 'admin';
   const dispatcher = isDispatcher();
   const v = state.view;
-  const unread = state.notifications.filter(n => !n.read_at).length+(staff?new Set((state.teamWorkspace?.events||[]).filter(e=>e.entity==='tasks'&&!e.read_at).map(e=>e.entity_id)).size:0);
+  const contextualTicket=['companies','company','projects','project','detail'].includes(v);
+  const unread = state.notifications.filter(n => !n.read_at).length;
   const chatUnread = state.notifications.filter(n => n.target === 'chat' && !n.read_at).length;
   const activeTasks=(state.teamWorkspace?.tasks||[]).filter(t=>t.status!=='done'&&t.status!=='cancelled'&&(t.owner_id===state.user.id||t.participants.includes(state.user.id)||(t.reviewer_id===state.user.id&&t.status==='review'))).length;
     const activeTickets = state.tickets.filter(t => !['done', 'closed'].includes(t.status)).length;
@@ -667,7 +672,7 @@ function shell(title, action, body, opts = {}) {
   const groups = [
     ['Обращения', [staff && item('queue', 'Входящие', 'queue', v === 'queue', state.queue.length), item('tickets', staff ? 'Заявки клиентов' : 'Мои заявки', 'ticket', ticketsActive, activeTickets), item('chats', 'Переписка', 'chat', chatsActive, chatUnread)]],
     ['Команда и работа', [staff && item('tasks', 'Задачи', 'check', ['tasks','task'].includes(v), activeTasks), staff && item('team', 'Команда, встречи и сделки', 'users', v === 'team')]],
-    ['Клиенты', [(dispatcher || (!staff && state.organizations.length)) && item('organizations', staff ? 'Компании' : 'Моя компания', 'building', v === 'organizations'), item('kb', 'Справочник', 'book', v === 'kb')]],
+    ['Компании и проекты', [item('companies','Компании','building',['companies','company'].includes(v)),item('projects','Проекты','ticket',['projects','project'].includes(v)),(dispatcher || (!staff && state.organizations.length)) && item('organizations','Участники и доступ','users',v==='organizations'),item('kb','Справочник','book',v==='kb')]],
     ['Финансы', [billingOn() && item('billing', 'Баланс и документы', 'wallet', v === 'billing'), staff && dispatcher && item('analytics', 'Отчёты', 'chart', v === 'analytics')]],
     ['Настройки', [item('messengers', 'Каналы связи', 'send', v === 'messengers'), admin && item('webhooks', 'Интеграции', 'link', v === 'webhooks')]],
   ].map(([label, items]) => { const list = items.filter(Boolean); return list.length ? `<details class="nav-cluster ${list.some(x=>x.includes('aria-current'))?'selected':''}"><summary>${label}${icon('chevron',12)}</summary><div class="nav-cluster-menu">${list.join('')}</div></details>` : ''; }).join('');
@@ -688,10 +693,10 @@ function shell(title, action, body, opts = {}) {
   const entering = viewKey !== lastViewKey && !reduceMotion();
   lastViewKey = viewKey;
   document.body.classList.remove('nav-open');
-  app.innerHTML = `<div class="shell"><aside id="sidebar" class="codari-masthead" aria-label="Основное меню"><div class="brand"><span class="brand-mark" aria-hidden="true">C</span><span><span class="brand-name">Codari<span class="brand-dot">.</span></span><small>Рабочее пространство</small></span></div><nav class="nav" aria-label="Разделы">${groups}</nav><div class="aside-bottom aside-user">${avatar(state.profile, 'small')}<div class="aside-user-meta"><strong>${esc(state.user.name)}</strong><small>${esc(subtitle)}</small></div><button id="theme-toggle" class="aside-logout" aria-label="Сменить тему">${icon(effectiveTheme() === 'dark' ? 'sun' : 'moon')}</button><button id="logout" class="aside-logout" aria-label="Выйти" title="Выйти">${icon('logout')}</button></div></aside><div class="nav-backdrop" data-nav-close></div><div class="workspace"><header class="topbar"><button class="icon-btn menu-btn" data-nav-toggle aria-controls="sidebar" aria-label="Открыть меню">${icon('menu')}</button><button type="button" class="global-search" id="open-palette" aria-haspopup="dialog">${icon('search', 17)}<span class="global-search-text">Поиск задач, заявок и разделов</span><kbd>Ctrl K</kbd></button><span class="topbar-spacer"></span><span id="connection-state" class="muted connection-state" role="status"></span><button class="button primary" id="top-new-ticket" aria-label="${staff?'Новая задача':'Новая заявка'}">${icon('plus', 16)}<span>${staff?'Новая задача':'Новая заявка'}</span></button>${staff ? '' : `<button class="icon-btn" id="tour-restart" aria-label="Пройти обучение по кабинету" title="Обучение по кабинету">${icon('help')}</button>`}<button class="icon-btn ${v === 'notifications' ? 'active' : ''}" data-nav="notifications" aria-label="Уведомления${unread ? `: ${unread} новых` : ''}">${icon('bell')}<span class="dot-count" id="notification-count">${unread || ''}</span></button><button class="top-profile ${v === 'profile' ? 'active' : ''}" data-nav="profile" aria-label="Мой профиль">${avatar(state.profile, 'small')}${icon('chevron', 14)}</button></header><main id="main" class="${entering ? 'is-entering' : ''}">${opts.crumbs ? `<nav class="crumbs" aria-label="Навигационная цепочка">${opts.crumbs}</nav>` : ''}<div class="top"><div class="top-text">${opts.badges ? `<div class="top-badges">${opts.badges}</div>` : kicker ? `<div class="eyebrow">${kicker}</div>` : ''}<h1>${esc(title)}</h1>${opts.lead ? `<p class="lead">${opts.lead}</p>` : ''}</div>${action ? `<div class="top-actions">${action}</div>` : ''}</div>${notice()}${state.loadFailures?.length?'<div class="notice" role="status">Часть данных не обновилась. Доступные данные сохранены. <button class="button small" id="retry-load">Повторить загрузку</button></div>':''}${body}</main></div><nav class="tabbar" aria-label="Быстрая навигация">${tabs}</nav></div>`;
+  app.innerHTML = `<div class="shell"><aside id="sidebar" class="codari-masthead" aria-label="Основное меню"><div class="brand"><span class="brand-mark" aria-hidden="true">C</span><span><span class="brand-name">Codari<span class="brand-dot">.</span></span><small>Рабочее пространство</small></span></div><nav class="nav" aria-label="Разделы">${groups}</nav><div class="aside-bottom aside-user">${avatar(state.profile, 'small')}<div class="aside-user-meta"><strong>${esc(state.user.name)}</strong><small>${esc(subtitle)}</small></div><button id="theme-toggle" class="aside-logout" aria-label="Сменить тему">${icon(effectiveTheme() === 'dark' ? 'sun' : 'moon')}</button><button id="logout" class="aside-logout" aria-label="Выйти" title="Выйти">${icon('logout')}</button></div></aside><div class="nav-backdrop" data-nav-close></div><div class="workspace"><header class="topbar"><button class="icon-btn menu-btn" data-nav-toggle aria-controls="sidebar" aria-label="Открыть меню">${icon('menu')}</button><button type="button" class="global-search" id="open-palette" aria-haspopup="dialog">${icon('search', 17)}<span class="global-search-text">Поиск задач, заявок и разделов</span><kbd>Ctrl K</kbd></button><span class="topbar-spacer"></span><span id="connection-state" class="muted connection-state" role="status"></span><button class="button primary" id="top-new-ticket" aria-label="${staff&&!contextualTicket?'Новая задача':'Новая заявка'}">${icon('plus', 16)}<span>${staff&&!contextualTicket?'Новая задача':'Новая заявка'}</span></button>${staff ? '' : `<button class="icon-btn" id="tour-restart" aria-label="Пройти обучение по кабинету" title="Обучение по кабинету">${icon('help')}</button>`}<button class="icon-btn ${v === 'notifications' ? 'active' : ''}" data-nav="notifications" aria-label="Уведомления${unread ? `: ${unread} новых` : ''}">${icon('bell')}<span class="dot-count" id="notification-count">${unread || ''}</span></button><button class="top-profile ${v === 'profile' ? 'active' : ''}" data-nav="profile" aria-label="Мой профиль">${avatar(state.profile, 'small')}${icon('chevron', 14)}</button></header><main id="main" class="${entering ? 'is-entering' : ''}">${opts.crumbs ? `<nav class="crumbs" aria-label="Навигационная цепочка">${opts.crumbs}</nav>` : ''}<div class="top"><div class="top-text">${opts.badges ? `<div class="top-badges">${opts.badges}</div>` : kicker ? `<div class="eyebrow">${kicker}</div>` : ''}<h1>${esc(title)}</h1>${opts.lead ? `<p class="lead">${opts.lead}</p>` : ''}</div>${action ? `<div class="top-actions">${action}</div>` : ''}</div>${notice()}${state.loadFailures?.length?'<div class="notice" role="status">Часть данных не обновилась. Доступные данные сохранены. <button class="button small" id="retry-load">Повторить загрузку</button></div>':''}${body}</main></div><nav class="tabbar" aria-label="Быстрая навигация">${tabs}</nav></div>`;
   document.querySelector('#retry-load')?.addEventListener('click',()=>refresh());
   const navActions = {
-    tasks: () => setView('tasks'), queue: () => setView('queue'), tickets: () => setView('tickets'), notifications: () => setView('notifications'), profile: () => setView('profile'),
+    companies:()=>setView('companies'),projects:()=>setView('projects'),tasks: () => setView('tasks'), queue: () => setView('queue'), tickets: () => setView('tickets'), notifications: () => setView('notifications'), profile: () => setView('profile'),
     organizations: () => setView('organizations'), team: () => setView('team'), kb: () => openKb(), billing: () => billingOn() ? openBilling() : setView('tickets'),
     analytics: () => openAnalytics(), webhooks: () => openWebhooks(), messengers: () => openMessengers(),
     chats: async () => { if (staff) return setView('chats'); try { const chat = await api('/chats', { method: 'POST' }); await refresh(); await openChat(chat.id); } catch (error) { showError(error); } },
@@ -706,7 +711,7 @@ function shell(title, action, body, opts = {}) {
   syncNavigation();
   document.querySelector('[data-nav-close]').onclick = () => {document.body.classList.remove('nav-open');syncNavigation();};
   document.querySelectorAll('.nav-cluster').forEach(cluster=>cluster.addEventListener('toggle',()=>{if(cluster.open)document.querySelectorAll('.nav-cluster').forEach(other=>{if(other!==cluster)other.open=false;});}));
-  document.querySelector('#top-new-ticket').onclick = () => staff?TasksUI.quickCreate():setView('new');
+  document.querySelector('#top-new-ticket').onclick = () => staff&&!contextualTicket?TasksUI.quickCreate():HierarchyUI.fromView();
   document.querySelector('#open-palette').onclick = () => openPalette();
   document.querySelector('#tour-restart')?.addEventListener('click', () => startTour());
   document.querySelector('#theme-toggle').onclick = toggleTheme;
@@ -780,7 +785,7 @@ function bindWaitingBulk() {
 function renderTickets() {
   const staff = state.user.role !== 'customer';
   const dispatcher = isDispatcher();
-  const owned = state.tickets.filter(t => state.owner === 'mine' ? t.assignee_id === state.user.id : state.owner === 'unassigned' ? !t.assignee_id : true);
+  const owned = state.tickets.filter(HierarchyUI.matchesTicket).filter(t => state.owner === 'mine' ? t.assignee_id === state.user.id : state.owner === 'unassigned' ? !t.assignee_id : true);
   if (!statusChipNames[state.filter]) state.filter = 'all';
   const visible = owned.filter(t => state.filter === 'all' || t.status === state.filter);
   const chip = (key, label, count, dot = '') => `<button type="button" class="chip ${state.filter === key ? 'active' : ''}" data-status-filter="${key}" aria-pressed="${state.filter === key}">${dot ? `<span class="dot ${dot}"></span>` : ''}${label} <i>${count}</i></button>`;
@@ -790,10 +795,11 @@ function renderTickets() {
     const sla = nearestSla(t);
     const finished = ['done', 'closed'].includes(t.status);
     const deadline = sla ? slaTag(sla) : finished ? `<span class="sla met">${icon('check', 13)}Завершена</span>` : `<span class="tdate">${esc(t.next_step || '—')}</span>`;
-    return `<button class="trow" data-ticket="${t.id}"><span class="tnum">${t.id}</span><span class="ttitle"><strong>${esc(t.title)}</strong><small>${esc([t.customer_name, staff ? t.customer_company : '', serviceLabel(t.service_type)].filter(Boolean).join(' · '))}</small></span><span class="badge ${esc(t.status)}">${statusNames[t.status]}</span><span>${deadline}</span><span class="tnum-strong">${t.effort_minutes ? hours(t.effort_minutes) : '—'}</span>${staff ? `<span class="twho">${avatarOf(t.assignee_id, t.assignee_name)}<span>${esc(t.assignee_name || 'Не назначен')}</span></span>` : ''}<span class="tdate">${date(t.updated_at)}</span></button>`;
+    return `<button class="trow" data-ticket="${t.id}"><span class="tnum">${t.id}</span><span class="ttitle"><strong>${esc(t.title)}</strong><small>${esc([t.company_name,t.project_name,serviceLabel(t.service_type)].filter(Boolean).join(' · '))}</small></span><span class="badge ${esc(t.status)}">${statusNames[t.status]}</span><span>${deadline}</span><span class="tnum-strong">${t.effort_minutes ? hours(t.effort_minutes) : '—'}</span>${staff ? `<span class="twho">${avatarOf(t.assignee_id, t.assignee_name)}<span>${esc(t.assignee_name || 'Не назначен')}</span></span>` : ''}<span class="tdate">${date(t.updated_at)}</span></button>`;
   };
   const head = '<div class="table-head" aria-hidden="true"><span>№</span><span>Заявка</span><span>Статус</span><span>Ближайший срок</span><span>Оценка</span><span>Ответственный</span><span>Обновлена</span></div>'.replace('<span>Ответственный</span>', staff ? '<span>Ответственный</span>' : '');
   shell(staff ? 'Заявки' : 'Мои заявки', '', `${staff ? '' : waitingPanel()}${portfolioOverview(owned)}<section class="panel ${staff ? '' : 'customer-ticket-list'}"><div class="toolbar"><div class="chips" role="group" aria-label="Фильтр по статусу">${chips}</div><div class="ticket-tools"><input class="field ticket-search" id="ticket-search" type="search" maxlength="100" aria-label="Поиск по заявкам" placeholder="Номер, тема, клиент" value="${esc(state.search)}">${ownerSelect}</div></div>${head}<div id="ticket-list"></div><div class="toolbar" style="border-top:1px solid var(--line-light);border-bottom:0;min-height:52px"><span class="muted" id="ticket-count"></span><span class="kbd-hint"><kbd>J</kbd><kbd>K</kbd> по строкам · <kbd>Enter</kbd> открыть</span></div></section>`, { kicker: staff ? (dispatcher ? 'Все клиенты' : 'Назначенные мне и команде') : 'Личный кабинет' });
+  HierarchyUI.mountTicketFilters();
   const updateList = () => {
     const query = state.search.trim().toLocaleLowerCase('ru-RU');
     const matches = query ? visible.filter(t => [t.id, t.title, t.description, t.customer_name, t.customer_company, t.assignee_name, statusNames[t.status]].some(value => String(value || '').toLocaleLowerCase('ru-RU').includes(query))) : visible;
@@ -846,15 +852,8 @@ function renderQueue() {
   document.querySelectorAll('[data-queue-source]').forEach(el => el.onclick = () => { state.queueSource = el.dataset.queueSource; renderQueue(); });
   document.querySelectorAll('[data-scope]').forEach(el => el.onclick = () => { state.queueScope = el.dataset.scope; renderQueue(); });
 }
-function renderNotifications() {
-  const taskRows=state.user.role!=='customer'?(state.teamWorkspace?.events||[]).filter(e=>e.entity==='tasks').map(e=>`<button class="ticket-row notification-row ${e.read_at?'':'unread'}" data-task-notification="${e.entity_id}"><span><strong>${esc(e.title)}</strong><small>${({assignment:'Назначение',mention:'Упоминание',review:'Нужна проверка',change:'Существенное изменение'})[e.event_kind]||'Назначение'} · ${date(e.created_at)}</small></span><span class="badge ${e.read_at?'':'new'}">${e.read_at?'Прочитано':'Новое'}</span></button>`).join(''):'';
-  const rows=state.notifications.map(n=>`<button class="ticket-row notification-row ${n.read_at?'':'unread'}" data-notice="${n.id}" data-target="${n.target}" data-record="${n.target==='chat'?n.chat_id:n.ticket_id}"><span><strong>${esc(n.text)}</strong><small>${n.target==='chat'?'Общий чат':'Заявка №'+n.ticket_id} · ${date(n.created_at)}</small></span><span class="badge ${n.read_at?'':'new'}">${n.read_at?'Прочитано':'Новое'}</span></button>`).join('');
-  const pushAction=pushSupported()&&!state.pushEnabled&&Notification.permission!=='denied'?`<button class="button" id="enable-push">${icon('bell',16)}Уведомления на телефон</button>`:'';
-  shell('Уведомления',pushAction,`<div class="panel">${taskRows+rows||'<div class="empty"><strong>Уведомлений пока нет</strong>Здесь появятся события по вашим заявкам.</div>'}</div>`);
-  document.querySelectorAll('[data-task-notification]').forEach(b=>b.onclick=()=>TasksUI.open(Number(b.dataset.taskNotification)));
-  document.querySelector('#enable-push')?.addEventListener('click',async e=>{e.target.disabled=true;try{await enablePush();toast('Уведомления включены');renderNotifications();}catch(error){toast(error.message,'error');e.target.disabled=false;}});
-  document.querySelectorAll('[data-notice]').forEach(el=>el.onclick=async()=>{try{await api(`/${el.dataset.target==='chat'?'chat-notifications':'notifications'}/${el.dataset.notice}/read`,{method:'POST'});await refresh();if(el.dataset.target==='chat')await openChat(Number(el.dataset.record));else await openTicket(Number(el.dataset.record));}catch(error){showError(error);}});
-}
+function renderNotifications() { return HierarchyUI.renderNotifications(); }
+
 function mountAssigneeFilter(select,serviceType){
   if(!select||document.querySelector('#assignee-specialty'))return;
   const suggested={development:'programmer',new_development:'programmer',integration:'integrator',support:'devops',maintenance:'support'}[serviceType];
@@ -945,11 +944,12 @@ function renderNew() {
   document.querySelector('#ticket-form > button.primary').insertAdjacentHTML('beforebegin',`<label id="visibility-field" ${!staff&&!state.organizations.length?'hidden':''}>Кому видна заявка<select class="field" name="visibility"><option value="organization">Всей компании</option><option value="private">Только автору</option></select></label><label>Файлы к заявке<input class="field" name="files" type="file" multiple accept=".png,.jpg,.jpeg,.webp,.gif,.pdf,.txt,.doc,.docx,.xls,.xlsx,.csv,.zip"><small>До 10 МБ на файл. Можно приложить после создания.</small></label>`);
   if(!staff&&state.organizations[0]?.members.some(m=>m.user_id===state.user.id&&m.role==='viewer')){document.querySelector('#visibility-field').hidden=true;document.querySelector('#visibility-field select').value='private';}
   if(staff)document.querySelector('#ticket-form [name="customer_id"]').onchange=e=>{const member=state.organizations.some(o=>o.members.some(m=>m.user_id===Number(e.target.value)));document.querySelector('#visibility-field').hidden=!member;document.querySelector('#visibility-field select').value=member?'organization':'private';};
-  document.querySelector('#back').onclick=()=>setView('tickets');
+  document.querySelector('#back')?.addEventListener('click',()=>setView('tickets'));
   if(staff)bindTicketTemplates(document.querySelector('#ticket-form'));
   bindTicketDraft(document.querySelector('#ticket-form'));
   mountAssigneeFilter(document.querySelector('#ticket-form [name="assignee_id"]'),document.querySelector('#ticket-form [name="service_type"]')?.value);
-  document.querySelector('#ticket-form').onsubmit=async e=>{e.preventDefault();const files=[...e.target.elements.files.files];const data=Object.fromEntries(new FormData(e.target));data.service_type=ticketServiceType(e.target);delete data.service_topic;delete data.files;if(document.querySelector('#visibility-field').hidden)data.visibility='private';if(staff){data.customer_id=Number(data.customer_id);if(dispatcher)data.assignee_id=data.assignee_id?Number(data.assignee_id):null;const effort=data.effort_hours;delete data.effort_hours;if(effort){if(dispatcher&&!data.assignee_id){showError(new Error('Чтобы сразу отправить оценку, выберите ответственного'));return;}data.effort_minutes=Math.round(Number(effort)*60);data.assessment_minutes=data.assessment_minutes?Number(data.assessment_minutes):null;}else{delete data.assessment_minutes;delete data.estimate_note;}}e.target.querySelector('button.primary').disabled=true;try{const ticket=await api('/tickets',{method:'POST',body:JSON.stringify(data)});clearDraft('new-ticket');clearDraft('ticket-form');const failed=[];for(const file of files){try{await upload(`/tickets/${ticket.id}/attachments`,file);}catch(error){failed.push(file.name);}}await refresh();await openTicket(ticket.id);if(failed.length){state.error=`Заявка создана, но файлы не загрузились: ${failed.join(', ')}. Прикрепите их в карточке.`;render();}}catch(error){showError(error);}};
+  HierarchyUI.bindNew(document.querySelector('#ticket-form'));
+  document.querySelector('#ticket-form').onsubmit=async e=>{e.preventDefault();const files=[...e.target.elements.files.files];const data=Object.fromEntries(new FormData(e.target));data.service_type=ticketServiceType(e.target);data.project_id=Number(data.project_id);delete data.company_key;delete data.service_topic;delete data.files;if(document.querySelector('#visibility-field').hidden)data.visibility='private';if(staff){data.customer_id=Number(data.customer_id);if(dispatcher)data.assignee_id=data.assignee_id?Number(data.assignee_id):null;const effort=data.effort_hours;delete data.effort_hours;if(effort){if(dispatcher&&!data.assignee_id){showError(new Error('Чтобы сразу отправить оценку, выберите ответственного'));return;}data.effort_minutes=Math.round(Number(effort)*60);data.assessment_minutes=data.assessment_minutes?Number(data.assessment_minutes):null;}else{delete data.assessment_minutes;delete data.estimate_note;}}e.target.querySelector('button.primary').disabled=true;try{const ticket=await api('/tickets',{method:'POST',body:JSON.stringify(data)});clearDraft('new-ticket');clearDraft('ticket-form');const failed=[];for(const file of files){try{await upload(`/tickets/${ticket.id}/attachments`,file);}catch(error){failed.push(file.name);}}await refresh();await openTicket(ticket.id);if(failed.length){state.error=`Заявка создана, но файлы не загрузились: ${failed.join(', ')}. Прикрепите их в карточке.`;render();}}catch(error){showError(error);}};
 }
 function bindTicketTemplates(form) {
   const select = form.querySelector('#template-select');
@@ -1251,7 +1251,7 @@ function renderDetail() {
   const assignee = dispatcher ? `<select id="assignee" aria-label="Ответственный"><option value="">Без ответственного</option>${state.staff.map(x => `<option value="${x.id}">${esc(staffLabel(x))}</option>`).join('')}</select>` : `<span class="meta-person">${t.assignee_id ? avatarOf(t.assignee_id, t.assignee_name) : ''}${esc(t.assignee_name || 'Не назначен')}</span>`;
   const canReply = !viewer && t.status !== 'closed';
   const chat = timeline(messages, state.current.meeting_summaries, m => messageHtml(m, { header: `${esc(m.author_name)} · ${date(m.created_at)}`, canReply })).map(x => x.html).join('') || `<div class="empty">${canReply ? 'Сообщений пока нет. Напишите первое сообщение.' : 'Сообщений пока нет. Здесь появится история переписки.'}</div>`;
-  const eventText = e => e.kind==='service_budget'?'лимит сопровождения изменён: '+(e.new_value==='unlimited'?'без ограничения':hours(Number(e.new_value))):e.kind==='owner_help'?'отправлен запрос менеджеру на восстановление владельца':e.kind === 'reopen' ? 'заявка возвращена в работу: ' + esc(e.new_value) : e.kind === 'status' ? 'статус изменён на «' + esc(statusNames[e.new_value] || e.new_value) + '»' : e.kind === 'acceptance' ? (e.new_value === 'accepted' ? 'работа принята' : 'работа возвращена на доработку') : e.kind === 'decline' ? 'заказчик отказался от заявки' : 'ответственный изменён';
+  const eventText = e => e.kind==='project_changed'?'проект изменён: '+esc((state.projects||[]).find(p=>p.id===Number(e.new_value))?.name||'проект №'+e.new_value):e.kind==='service_budget'?'лимит сопровождения изменён: '+(e.new_value==='unlimited'?'без ограничения':hours(Number(e.new_value))):e.kind==='owner_help'?'отправлен запрос менеджеру на восстановление владельца':e.kind === 'reopen' ? 'заявка возвращена в работу: ' + esc(e.new_value) : e.kind === 'status' ? 'статус изменён на «' + esc(statusNames[e.new_value] || e.new_value) + '»' : e.kind === 'acceptance' ? (e.new_value === 'accepted' ? 'работа принята' : 'работа возвращена на доработку') : e.kind === 'decline' ? 'заказчик отказался от заявки' : 'ответственный изменён';
   const history = events.map(e => `<li><div>${esc(e.actor_name)}: ${eventText(e)}<small>${date(e.created_at)}</small></div></li>`).join('');
   const person = state.current.assignee_profile;
   if (!staff && state.detailTab === 'notes') state.detailTab = 'messages';
@@ -1261,10 +1261,11 @@ function renderDetail() {
   const meta = `<dl class="meta"><dt>Заказчик</dt><dd>${esc(t.customer_name)}${staff && t.customer_company ? `<small>${esc(t.customer_company)}</small>` : ''}</dd>${staff ? `<dt>Ответственный</dt><dd>${assignee}</dd>` : ''}<dt>Тип задачи</dt><dd>${esc(serviceLabel(t.service_type))}</dd>${t.organization_id ? `<dt>Видимость</dt><dd>${t.visibility === 'organization' ? 'Вся компания' : 'Личная заявка'}</dd>` : ''}<dt>Создана</dt><dd>${date(t.created_at)}</dd>${t.created_by_name ? `<dt>Создал</dt><dd>${esc(t.created_by_name)}</dd>` : ''}</dl>`;
   const personCard = staff && person ? `<section class="panel content assigned-person"><div class="person-heading">${avatar(person)}<div><span class="eyebrow">${staff ? 'Ответственный' : 'Ваш специалист'}</span><h2>${esc(person.name)}</h2><p>${esc([(person.function_names||[teamRoleNames[person.team_role]]).filter(Boolean).join(", "),person.job_title].filter(Boolean).join(' · ') || 'Сотрудник команды')}</p></div></div>${person.bio ? `<p class="person-bio">${esc(person.bio)}</p>` : ''}</section>` : '';
   const body = `${ticketProgress(t, estimates)}<div class="detail-grid"><div>${t.next_step ? `<div class="next-step"><span>Следующий шаг</span><strong>${esc(t.next_step)}</strong></div>` : ''}<section class="panel content"><h2>Описание задачи</h2><p class="description">${esc(t.description)}</p>${state.current.linked_chat ? `<button class="button linked-chat" id="linked-chat">${icon('chat', 16)}Обсуждение в общем чате</button>` : ''}</section><section class="panel conversation"><div class="tabs" role="tablist" aria-label="Обсуждение заявки">${tabButton('messages', 'Переписка', messages.length)}${staff ? tabButton('notes', 'Заметки команды', undefined, icon('lock', 14)) : ''}${tabButton('history', 'История', events.length)}</div><div class="tab-pane" data-pane="messages" ${tab !== 'messages' ? 'hidden' : ''}><div class="messages">${chat}</div>${composer}</div>${staff ? `<div class="tab-pane" data-pane="notes" ${tab !== 'notes' ? 'hidden' : ''}><div id="internal-notes-container"></div></div>` : ''}<div class="tab-pane" data-pane="history" ${tab !== 'history' ? 'hidden' : ''}>${history ? `<ol class="events">${history}</ol>` : '<div class="empty">В истории пока нет событий.</div>'}</div></section>${renderCsat(t, staff)}</div><div><section class="panel content"><h2>Детали</h2>${meta}</section>${personCard}</div></div>`;
-  shell(t.title, statusControl, body, { crumbs: `<button class="crumb-link" id="back">Заявки</button><span aria-hidden="true">/</span><span>№${t.id}</span>`, badges, lead });
+  shell(t.title, statusControl, body, { crumbs: HierarchyUI.ticketCrumbs(t), badges, lead });
   renderEstimate(t, estimates, staff);
   renderAcceptance(t, staff);
   renderOperations();
+  HierarchyUI.mountTicket(t);
   foldTicketContext();
   if(t.visibility==='organization'&&t.has_available_owner===false){
     document.querySelector('.detail-grid>div:first-child').insertAdjacentHTML('afterbegin',`<section class="notice" role="status"><p>У компании нет владельца с действующим доступом. Согласование общих работ недоступно.</p>${dispatcher?'<button class="button" id="resolve-owner">Назначить владельца или восстановить доступ</button>':'<p>Менеджер поможет назначить владельца или восстановить его доступ.</p><button class="button" id="request-owner-help">Попросить менеджера восстановить согласование</button>'}</section>`);
@@ -1277,7 +1278,7 @@ function renderDetail() {
   }
   if(staff&&t.can_write!==false&&state.teamWorkspace?.my_permissions.includes('tasks')){document.querySelector('.detail-grid>div:last-child').insertAdjacentHTML('beforeend',`<section class="panel content"><h2>Работа по заявке</h2><button class="button" id="ticket-create-task">Создать связанную задачу</button></section>`);document.querySelector('#ticket-create-task').onclick=()=>TasksUI.quickCreate({title:t.title,description:t.description.slice(0,5000),customer_id:t.customer_id,customer_name:t.customer_name,ticket_id:t.id,owner_id:state.user.id});}
   document.querySelector('#linked-chat')?.addEventListener('click', () => openChat(state.current.linked_chat.chat_id));
-  document.querySelector('#back').onclick = () => setView('tickets');
+  document.querySelector('#back')?.addEventListener('click',()=>setView('tickets'));
   if (dispatcher) {document.querySelector('#assignee').value = t.assignee_id || '';mountAssigneeFilter(document.querySelector('#assignee'),t.service_type);}
   if (canStatus) document.querySelector('#status').value = t.status;
   document.querySelectorAll('[data-detail-tab]').forEach(button => button.onclick = () => { state.detailTab = button.dataset.detailTab; document.querySelectorAll('[data-detail-tab]').forEach(x => { const on = x === button; x.classList.toggle('active', on); x.setAttribute('aria-selected', String(on)); }); document.querySelectorAll('.tab-pane').forEach(pane => pane.hidden = pane.dataset.pane !== state.detailTab); });
@@ -1532,9 +1533,13 @@ function renderChatDetail() {
       }
     });
     document.querySelector('#chat-message-form').insertAdjacentHTML('afterend', '<form class="form chat-ticket-form" id="chat-ticket-form" hidden><strong>Новая заявка из чата</strong><label>Тема<input class="field" name="title" required minlength="3" maxlength="140"></label><input type="hidden" name="message_id"><div class="row"><button class="button primary">Создать заявку</button><button class="button" type="button" id="cancel-chat-ticket">Отмена</button></div></form>' + serviceForm(chatServiceTarget(chat), service_entries));
+    const chatKey=chat.organization_id?`org:${chat.organization_id}`:`user:${chat.customer_id}`;
+    const chatProjects=state.projects.filter(p=>p.company_key===chatKey&&p.state==='active'&&p.can_create_ticket);
+    document.querySelector('#chat-ticket-form').querySelector('strong').insertAdjacentHTML('afterend',`<label>Проект<select class="field" name="project_id" required><option value="">Выберите проект</option>${chatProjects.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select></label><small class="muted">Компания остаётся той же, что и в чате.</small>`);
+    if(chatProjects.length===1)document.querySelector('#chat-ticket-form').elements.project_id.value=String(chatProjects[0].id);
     document.querySelectorAll('[data-message]').forEach(el => el.onclick = () => { const msg = messages.find(m => m.id === Number(el.dataset.message)); const form = document.querySelector('#chat-ticket-form'); form.hidden = false; form.elements.message_id.value = msg.id; form.elements.title.value = msg.body.slice(0, 100); form.elements.title.focus(); });
     document.querySelector('#cancel-chat-ticket').onclick = () => document.querySelector('#chat-ticket-form').hidden = true;
-    document.querySelector('#chat-ticket-form').onsubmit = async e => { e.preventDefault(); const button = e.target.querySelector('button.primary'); button.disabled = true; try { const data = Object.fromEntries(new FormData(e.target)); const ticket = await api(`/chats/${chat.id}/tickets`, { method: 'POST', body: JSON.stringify({ title: data.title, message_id: Number(data.message_id) }) }); await refresh(); await openTicket(ticket.id); } catch (error) { showError(error); } };
+    document.querySelector('#chat-ticket-form').onsubmit = async e => { e.preventDefault(); const button = e.target.querySelector('button.primary'); button.disabled = true; try { const data = Object.fromEntries(new FormData(e.target)); const ticket = await api(`/chats/${chat.id}/tickets`, { method: 'POST', body: JSON.stringify({ title: data.title, message_id: Number(data.message_id),project_id:Number(data.project_id) }) }); await refresh(); await openTicket(ticket.id); } catch (error) { showError(error); } };
   }
   if (staff) bindServiceForm(chatServiceTarget(chat));
   document.querySelector('#back-chats')?.addEventListener('click', () => setView('chats'));
@@ -2221,7 +2226,11 @@ function formatRuDate(isoStr) {
   return d.toLocaleDateString('ru-RU');
 }
 
+async function reloadBilling() {
+  return state.billingScope ? HierarchyUI.openCompanyBilling(state.billingScope) : openBilling();
+}
 async function openBilling() {
+  state.billingScope='';
   if (!billingOn()) { setView(state.user.role === 'customer' ? 'tickets' : 'tasks'); return; }
   setView('billing');
   syncRoute();
@@ -2333,7 +2342,7 @@ function renderBilling() {
   }
 
   const month = new Date().toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' });
-  shell('Баланс и документы', actions, `${kpis}<div class="${staff ? 'split billing-split' : ''}"><section class="panel">${tabs}${content}</section>${side}</div><div id="billing-modal-slot"></div>`, { kicker: month.charAt(0).toUpperCase() + month.slice(1) });
+  shell('Баланс и документы', actions, `${kpis}<div class="${staff ? 'split billing-split' : ''}"><section class="panel">${tabs}${content}</section>${side}</div><div id="billing-modal-slot"></div>`, { kicker: state.billingScope ? b.name : month.charAt(0).toUpperCase() + month.slice(1), crumbs:state.billingScope?`<button class="crumb-link" data-hierarchy-root>Компании</button><span>/</span><button class="crumb-link" data-company-link="${esc(state.billingScope)}">${esc(b.name)}</button><span>/</span><span>Баланс и документы</span>`:undefined });
 
   document.querySelectorAll('.billing-table').forEach(table => {
     const labels=[...table.querySelectorAll('thead th')].map(th=>th.textContent.trim());
@@ -2357,7 +2366,7 @@ function attachBillingHandlers() {
     };
   });
 
-  document.querySelectorAll('[data-mark-signed]').forEach(button=>button.onclick=async()=>{if(!confirm('Отметить, что акт подписан сторонами?'))return;try{await api(`/billing/invoices/${button.dataset.markSigned}/status`,{method:'PATCH',body:JSON.stringify({status:'signed'})});await openBilling();}catch(error){showError(error);}});
+  document.querySelectorAll('[data-mark-signed]').forEach(button=>button.onclick=async()=>{if(!confirm('Отметить, что акт подписан сторонами?'))return;try{await api(`/billing/invoices/${button.dataset.markSigned}/status`,{method:'PATCH',body:JSON.stringify({status:'signed'})});await reloadBilling();}catch(error){showError(error);}});
   document.querySelectorAll('[data-mark-paid]').forEach(btn => {
     btn.onclick = async () => {
       if(!confirm('Подтвердить фактическое поступление денег по этому счёту? Часы будут зачислены клиенту.'))return;
@@ -2367,7 +2376,7 @@ function attachBillingHandlers() {
           method: 'PATCH',
           body: JSON.stringify({ status: 'paid' })
         });
-        await openBilling();
+        await reloadBilling();
       } catch(err) {
         showError(err);
       }
@@ -2383,7 +2392,7 @@ function attachBillingHandlers() {
           method: 'PATCH',
           body: JSON.stringify({ status: 'cancelled' })
         });
-        await openBilling();
+        await reloadBilling();
       } catch(err) {
         showError(err);
       }
@@ -2392,7 +2401,7 @@ function attachBillingHandlers() {
 
 
 
-  bindServiceDelete(openBilling);
+  bindServiceDelete(reloadBilling);
   document.querySelector('#btn-create-act')?.addEventListener('click', () => openActModal());
   document.querySelector('#btn-close-period')?.addEventListener('click', () => openActModal());
   document.querySelector('#btn-create-invoice')?.addEventListener('click', () => openInvoiceModal());
@@ -2573,7 +2582,7 @@ async function openActModal(preselectedKey = '') {
         })
       });
       slot.innerHTML = '';
-      await openBilling();
+      await reloadBilling();
       window.open(`/api/billing/invoices/${doc.id}/print`, '_blank');
     } catch(err) {
       showError(err);
@@ -2662,7 +2671,7 @@ async function openInvoiceModal(preselectedKey = '') {
         })
       });
       slot.innerHTML = '';
-      await openBilling();
+      await reloadBilling();
       window.open(`/api/billing/invoices/${doc.id}/print`, '_blank');
     } catch(err) {
       showError(err);
@@ -2752,7 +2761,7 @@ async function openDepositModal(preselectedKey = '') {
         })
       });
       slot.innerHTML = '';
-      await openBilling();
+      await reloadBilling();
     } catch(err) {
       showError(err);
     }
@@ -2809,7 +2818,7 @@ function openClientRateModal(c) {
         })
       });
       slot.innerHTML = '';
-      await openBilling();
+      await reloadBilling();
     } catch(err) {
       showError(err);
     }
@@ -2877,7 +2886,7 @@ function openCustomerInvoiceModal() {
         })
       });
       slot.innerHTML = '';
-      await openBilling();
+      await reloadBilling();
       window.open(`/api/billing/invoices/${doc.id}/print`, '_blank');
     } catch(err) {
       showError(err);
@@ -2889,19 +2898,19 @@ async function openHash(){
   if(!state.user||state.user.must_change_credentials)return;
   state.restoringRoute=true;
   try{
-    const route=location.hash.slice(1);const taskMatch=route.match(/^task\/(\d+)$/);if(taskMatch){if(state.user.role==='customer')return setView('tickets');return await TasksUI.open(Number(taskMatch[1]));}const match=route.match(/^(ticket|chat)\/(\d+)$/);
+    const route=location.hash.slice(1);const billingMatch=route.match(/^company\/(org:\d+|user:\d+)\/billing$/);if(billingMatch)return await HierarchyUI.openCompanyBilling(billingMatch[1]);const hierarchyMatch=route.match(/^(company|project|invoice)\/(.+)$/);if(hierarchyMatch){const[,kind,id]=hierarchyMatch;return await (kind==='company'?HierarchyUI.openCompany(id):kind==='project'?HierarchyUI.openProject(Number(id)):HierarchyUI.openInvoice(Number(id)));}const teamMatch=route.match(/^team\/(meetings|deals)\/(\d+)$/);if(teamMatch)return await TeamUI.openRecord(teamMatch[1],Number(teamMatch[2]));const taskMatch=route.match(/^task\/(\d+)$/);if(taskMatch){if(state.user.role==='customer')return setView('tickets');return await TasksUI.open(Number(taskMatch[1]));}const match=route.match(/^(ticket|chat)\/(\d+)$/);
     if(match)return await (match[1]==='ticket'?openTicket(Number(match[2])):openChat(Number(match[2])));
     const loaders={messengers:openMessengers,analytics:openAnalytics,kb:openKb,webhooks:openWebhooks,billing:openBilling};
     if(route==='webhooks'&&state.user.role!=='admin')return setView('tickets');
     if(route==='analytics'&&!isDispatcher())return setView('tickets');
     if(loaders[route])return await loaders[route]();
-    const views=['tasks','tickets','queue','organizations','team','profile','new','notifications','chats'];
+    const views=['companies','projects','tasks','tickets','queue','organizations','team','profile','new','notifications','chats'];
     if(views.includes(route)&&!(['team','tasks'].includes(route)&&state.user.role==='customer')&&!(route==='queue'&&state.user.role==='customer'))setView(route);
-    else setView(state.user.role==='customer'?'tickets':'tasks');
+    else if(state.user.role==='customer'&&state.companies.length===1)await HierarchyUI.openCompany(state.companies[0].company_key);else setView(state.user.role==='customer'?'companies':'tasks');
   }catch(error){showError(error);}finally{state.restoringRoute=false;}
 }
 
-function render() {syncRoute();if(!state.user)return renderAuth();if(state.user.must_change_credentials)return renderCredentials();if(state.view==='organizations')return renderOrganizations();if(state.view==='profile')return renderProfile();if(state.view==='messengers')return renderMessengers();if(state.view==='queue')return renderQueue();if(state.view==='new')return renderNew();if(state.view==='detail'&&state.current)return renderDetail();if(state.view==='tasks')return TasksUI.render();if(state.view==='task')return TasksUI.renderDetail();if(state.view==='team')return renderTeam();if(state.view==='notifications')return renderNotifications();if(state.view==='chats')return renderChats();if(state.view==='chat'&&state.currentChat)return renderChatDetail();if(state.view==='analytics')return renderAnalytics();if(state.view==='kb')return renderKb();if(state.view==='webhooks')return renderWebhooks();if(state.view==='billing')return renderBilling();renderTickets();}
+function render() {syncRoute();if(!state.user)return renderAuth();if(state.user.must_change_credentials)return renderCredentials();if(state.view==='companies')return HierarchyUI.renderCompanies();if(state.view==='company')return HierarchyUI.renderCompany();if(state.view==='projects')return HierarchyUI.renderProjects();if(state.view==='project')return HierarchyUI.renderProject();if(state.view==='invoice')return HierarchyUI.renderInvoice();if(state.view==='organizations')return renderOrganizations();if(state.view==='profile')return renderProfile();if(state.view==='messengers')return renderMessengers();if(state.view==='queue')return renderQueue();if(state.view==='new')return renderNew();if(state.view==='detail'&&state.current)return renderDetail();if(state.view==='tasks')return TasksUI.render();if(state.view==='task')return TasksUI.renderDetail();if(state.view==='team')return renderTeam();if(state.view==='notifications')return renderNotifications();if(state.view==='chats')return renderChats();if(state.view==='chat'&&state.currentChat)return renderChatDetail();if(state.view==='analytics')return renderAnalytics();if(state.view==='kb')return renderKb();if(state.view==='webhooks')return renderWebhooks();if(state.view==='billing')return renderBilling();renderTickets();}
 async function start(){
   const params=new URLSearchParams(location.search);
   if(params.has('invite')||params.has('reset')){renderAuth();return;}
