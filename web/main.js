@@ -1,13 +1,374 @@
 const app = document.querySelector('#app');
-const state = { user: null, profile: null, tickets: [], chats: [], queue: [], staff: [], customers: [], organizations: [], notifications: [], current: null, currentChat: null, view: 'tickets', filter: 'all', search: '', authMode: 'login', error: '', internalNotes: [], cannedResponses: [], analytics: null, kbCategories: [], kbArticles: [], kbActiveCategory: null, kbSearch: '', kbReadingArticle: null, kbEditingArticle: null, gitLinks: [], webhooks: [], billing: null, billingTab: 'docs', billingFilter: 'all', billingModal: null };
-const statusNames = { new: 'Новая', working: 'В работе', waiting: 'Ожидает заказчика', done: 'Выполнена', closed: 'Закрыта' };
+const state = { user: null, profile: null, tickets: [], chats: [], queue: [], staff: [], customers: [], organizations: [], notifications: [], current: null, currentChat: null, view: 'tickets', filter: 'all', search: '', authMode: 'login', error: '', internalNotes: [], cannedResponses: [], analytics: null, kbCategories: [], kbArticles: [], kbActiveCategory: null, kbSearch: '', kbReadingArticle: null, kbEditingArticle: null, gitLinks: [], webhooks: [], billing: null, billingTab: 'docs', billingFilter: 'all', billingModal: null, owner: 'all', queueScope: 'all', queueSource: 'all', queueGroup: null, detailTab: 'messages', chatSearch: '', waiting: [], replyTo: null };
+const statusNames = { new: 'Новая', working: 'В работе', waiting: 'Ожидает заказчика', done: 'На проверке', closed: 'Закрыта' };
+const teamRoleNames = {programmer:'Программист',integrator:'Интегратор',devops:'Девопс',analyst:'Аналитик',designer:'Дизайнер',qa:'Тестировщик',sales:'Продажи',account:'Ведение клиентов',call_host:'Проведение созвонов',support:'Поддержка',project_manager:'Управление проектами',team_lead:'Руководство командой',finance:'Финансовый учёт'};
+const staffLabel = person => `${person.name}${(person.functions||[person.team_role]).filter(Boolean).length?' · '+(person.functions||[person.team_role]).filter(Boolean).map(c=>state.teamWorkspace?.functions.find(f=>f.code===c)?.name||teamRoleNames[c]||c).join(', '):''}`;
+const teamRoleOptions = selected => `<option value="">Не назначена</option>${Object.entries(teamRoleNames).map(([value,label])=>`<option value="${value}" ${selected===value?'selected':''}>${label}</option>`).join('')}`;
 const estimateNames = {pending:'Ожидает решения',approved:'Одобрена',rejected:'Отклонена',revision_requested:'Запрошена корректировка'};
-const serviceNames = {development:'Доработка',integration:'Интеграция',support:'Поддержка',consultation:'Консультация',other:'Другое'};
-const serviceHints = {development:'Что нужно изменить? Как должен выглядеть готовый результат? Где это работает сейчас?',integration:'Какие системы нужно связать? Какие данные передавать и в каком направлении? Есть ли документация API?',support:'Что не работает? Когда возникла проблема? Какие действия её повторяют?',consultation:'По какому вопросу нужна помощь? Какое решение вы хотите принять?',other:'Что нужно сделать? Какой результат вы ожидаете?'};
-const hours = minutes => `${(minutes/60).toLocaleString('ru-RU',{maximumFractionDigits:2})} ч`;
+const serviceNames = {development:'Доработка',new_development:'Разработка',integration:'Интеграция',support:'Поддержка',maintenance:'Сопровождение',consultation:'Консультация',other:'Другое'};
+const serviceLabel = value => value?.startsWith('custom:') ? value.slice(7) : serviceNames[value] || 'Другое';
+const ticketServiceType = form => form.elements.service_type.value === 'other' ? `custom:${form.elements.service_topic.value.trim()}` : form.elements.service_type.value;
+const serviceHints = {development:'Что нужно изменить? Как должен выглядеть готовый результат? Где это работает сейчас?',new_development:'Что нужно разработать? Какие функции нужны и каким должен быть готовый результат?',integration:'Какие системы нужно связать? Какие данные передавать и в каком направлении? Есть ли документация API?',support:'Что не работает? Когда возникла проблема? Какие действия её повторяют?',maintenance:'Что нужно сопровождать? Какие регулярные работы и уровень обслуживания нужны?',consultation:'По какому вопросу нужна помощь? Какое решение вы хотите принять?',other:'Что нужно сделать? Какой результат вы ожидаете?'};
+const serviceKindNames = {chat:'Переписка',call:'Созвон',meeting:'Встреча',other:'Прочее'};
+const hours = minutes =>`${(minutes/60).toLocaleString('ru-RU',{maximumFractionDigits:2})} ч`;
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const avatar = (person, extra='') => `<span class="person-avatar ${extra}">${person?.avatar_url?`<img src="${esc(person.avatar_url)}" alt="">`:esc((person?.name||'?').trim().split(/\s+/).slice(0,2).map(word=>word[0]).join('').toUpperCase())}</span>`;
 const date = value => new Date(value).toLocaleString('ru-RU', {day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'});
+const statusChipNames = { new: 'Новые', working: 'В работе', waiting: 'Ожидают', done: 'На проверке', closed: 'Закрыты' };
+const ICONS = {
+  queue: '<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
+  ticket: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M8 13h8M8 17h5"/>',
+  chat: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
+  building: '<rect x="4" y="2" width="16" height="20" rx="2"/><path d="M9 22v-4h6v4M8 6h.01M12 6h.01M16 6h.01M8 10h.01M12 10h.01M16 10h.01M8 14h.01M12 14h.01M16 14h.01"/>',
+  book: '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V2H6.5A2.5 2.5 0 0 0 4 4.5z"/><path d="M20 17v5H6.5A2.5 2.5 0 0 1 4 19.5"/>',
+  wallet: '<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20M6 15h4"/>',
+  chart: '<path d="M3 3v18h18"/><path d="m7 15 4-4 3 3 5-6"/>',
+  users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
+  send: '<path d="m22 2-7 20-4-9-9-4z"/><path d="M22 2 11 13"/>',
+  link: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
+  bell: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>',
+  menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
+  more: '<circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/>',
+  chevron: '<path d="m6 9 6 6 6-6"/>',
+  lock: '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+  print: '<path d="M6 9V2h12v7M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/>',
+  download: '<path d="M12 3v12M7 10l5 5 5-5M5 21h14"/>',
+  paperclip: '<path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>',
+  check: '<path d="M20 6 9 17l-5-5"/>',
+  user: '<circle cx="12" cy="8" r="4"/><path d="M4 21v-1a7 7 0 0 1 16 0v1"/>',
+  alert: '<circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/>',
+  arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>',
+  moon: '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>',
+  help: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 0 1 4.9.8c0 1.7-2.4 2.2-2.4 3.7M12 17h.01"/>',
+  reply: '<path d="M9 17 4 12l5-5"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/>',
+  checks: '<path d="M17 7 6.5 17.5 2 13"/><path d="m22 8-9.5 9.5-1.5-1.5"/>',
+  close: '<path d="m6 6 12 12M18 6 6 18"/>',
+  mail: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>',
+};
+const icon = (name, size = 18) => `<svg class="ico" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ''}</svg>`;
+const initials = name => esc((name || '?').trim().split(/\s+/).slice(0, 2).map(word => word[0]).join('').toUpperCase());
+const plural = (n, [one, few, many]) => { const a = Math.abs(n) % 100, b = a % 10; return a > 10 && a < 20 ? many : b === 1 ? one : b >= 2 && b <= 4 ? few : many; };
+const canManageFinance = () => isDispatcher() || Boolean(state.teamWorkspace?.my_permissions.includes('billing_manage'));
+const billingOn = () => Boolean(state.settings?.billing_enabled) && (state.user?.role==='customer' || isDispatcher() || Boolean(state.teamWorkspace?.my_permissions.some(p=>['billing_read','billing_manage'].includes(p))));
+const isDispatcher = () => state.user.role === 'admin' || Boolean(state.user.is_manager);
+const personById = id => state.staff.find(person => person.id === id);
+const avatarOf = (id, name) => id ? avatar(personById(id) || { name }, 'small') : '<span class="person-avatar small vacant" title="Не назначен" aria-label="Не назначен">+</span>';
+const reduceMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+let lastViewKey = '';
+function toast(text, tone = 'success') {
+  let host = document.querySelector('#toasts');
+  if (!host) { host = document.createElement('div'); host.id = 'toasts'; host.className = 'toasts'; host.setAttribute('role', 'status'); host.setAttribute('aria-live', 'polite'); document.body.append(host); }
+  const el = document.createElement('div');
+  el.className = `toast ${tone}`;
+  el.innerHTML = `${icon(tone === 'error' ? 'alert' : tone === 'info' ? 'bell' : 'check', 16)}<span>${esc(text)}</span>`;
+  host.append(el);
+  setTimeout(() => { el.classList.add('leaving'); setTimeout(() => el.remove(), 260); }, 3600);
+}
+function countUp(el) {
+  const text = el.textContent;
+  const m = text.match(/^(\D*?)(\d[\d\s ]*(?:[.,]\d+)?)(.*)$/s);
+  if (!m) return;
+  const raw = m[2].replace(/[\s ]/g, '').replace(',', '.');
+  const target = Number(raw);
+  if (!target || !isFinite(target)) return;
+  const decimals = (raw.split('.')[1] || '').length;
+  const started = performance.now();
+  const frame = now => {
+    const p = Math.min(1, (now - started) / 700);
+    const value = target * (1 - Math.pow(1 - p, 3));
+    el.textContent = p < 1 ? m[1] + value.toLocaleString('ru-RU', { minimumFractionDigits: decimals, maximumFractionDigits: decimals }) + m[3] : text;
+    if (p < 1) requestAnimationFrame(frame);
+  };
+  requestAnimationFrame(frame);
+}
+function animateEntrance() {
+  const main = document.querySelector('#main.is-entering');
+  if (!main) return;
+  main.querySelectorAll('.top, .panel, .stat, .billing-kpi, .focus-panel, .activity-panel, .ticket-progress, .next-step, .profile-note, .form-help, .kb-card, .webhook-card, .csat-box').forEach((el, i) => el.style.setProperty('--i', Math.min(i, 12)));
+  main.querySelectorAll('.qrow, .trow, .chat-item, .ticket-row').forEach((el, i) => el.style.setProperty('--i', Math.min(i, 14) + 2));
+  if (!reduceMotion()) main.querySelectorAll('.stat strong, .billing-kpi-value, .overview-card strong.big').forEach(countUp);
+  setTimeout(() => main.classList.remove('is-entering'), 1500);
+}
+function popLastMessage(box) {
+  if (!state.justSent || !box) return;
+  state.justSent = false;
+  const mine = box.querySelectorAll('.message.mine');
+  mine[mine.length - 1]?.classList.add('pop');
+}
+function openPalette() {
+  if (!state.user || document.querySelector('.palette-backdrop')) return;
+  const staff = state.user.role !== 'customer';
+  const returnFocus = document.activeElement;
+  const pages = [
+    ...[...document.querySelectorAll('aside [data-nav]')].map(b => ({ group: 'Разделы', svg: b.querySelector('svg')?.outerHTML || '', label: b.querySelector('span')?.textContent || '', run: () => b.click() })),
+    { group: 'Разделы', svg: icon('bell'), label: 'Уведомления', run: () => setView('notifications') },
+    { group: 'Разделы', svg: icon('user'), label: 'Мой профиль', run: () => setView('profile') },
+    { group: 'Действия', svg: icon('plus'), label: staff?'Создать задачу':'Создать заявку', run: () => staff?TasksUI.quickCreate():setView('new') },
+    ...(staff ? [] : [{ group: 'Действия', svg: icon('help'), label: 'Пройти обучение по кабинету', run: () => startTour() }]),
+    { group: 'Действия', svg: icon(effectiveTheme() === 'dark' ? 'sun' : 'moon'), label: effectiveTheme() === 'dark' ? 'Включить светлую тему' : 'Включить тёмную тему', run: () => toggleTheme() },
+  ].map(item => ({ ...item, hay: item.label.toLocaleLowerCase('ru-RU') }));
+  const tickets = state.tickets.slice().sort((a, b) => b.updated_at.localeCompare(a.updated_at)).map(t => ({ group: 'Заявки', svg: icon('ticket'), label: `№${t.id} · ${t.title}`, hint: statusNames[t.status], run: () => openTicket(t.id), hay: [t.id, t.title, t.customer_name, t.customer_company].join(' ').toLocaleLowerCase('ru-RU') }));
+  const tasks = staff ? (state.teamWorkspace?.tasks||[]).map(t=>({group:'Задачи',svg:icon('check'),label:`№${t.id} · ${t.title}`,hint:({new:'Новая',working:'В работе',review:'На проверке',done:'Выполнена',cancelled:'В архиве'})[t.status],run:()=>TasksUI.open(t.id),hay:[t.id,t.title,t.description].join(' ').toLocaleLowerCase('ru-RU')})):[];
+  const chats = staff ? state.chats.map(c => ({ group: 'Чаты', svg: icon('chat'), label: c.customer_name, hint: c.last_message || '', run: () => openChat(c.id), hay: [c.customer_name, c.last_message].join(' ').toLocaleLowerCase('ru-RU') })) : [];
+  document.body.insertAdjacentHTML('beforeend', `<div class="palette-backdrop"><div class="palette" role="dialog" aria-modal="true" aria-label="Быстрый переход"><div class="palette-search">${icon('search', 18)}<input id="palette-input" role="combobox" aria-expanded="true" aria-controls="palette-list" aria-autocomplete="list" autocomplete="off" placeholder="Найти задачу, заявку или раздел…"><kbd>Esc</kbd></div><div class="palette-list" id="palette-list" role="listbox" aria-label="Результаты"></div><div class="palette-foot"><span><kbd>↑</kbd><kbd>↓</kbd> выбрать</span><span><kbd>Enter</kbd> открыть</span><span><kbd>Esc</kbd> закрыть</span></div></div></div>`);
+  const backdrop = document.querySelector('.palette-backdrop');
+  const input = backdrop.querySelector('#palette-input');
+  const list = backdrop.querySelector('#palette-list');
+  let results = [];
+  let active = 0;
+  const close = () => { backdrop.classList.add('closing'); setTimeout(() => backdrop.remove(), 160); returnFocus?.focus?.(); };
+  const runItem = item => { close(); item?.run(); };
+  const paint = () => {
+    let group = '';
+    list.innerHTML = results.map((item, i) => { const head = item.group !== group ? `<div class="palette-group">${item.group}</div>` : ''; group = item.group; return `${head}<div class="palette-item ${i === active ? 'active' : ''}" role="option" id="pal-opt-${i}" aria-selected="${i === active}" data-index="${i}">${item.svg}<span class="palette-label">${esc(item.label)}</span>${item.hint ? `<span class="palette-hint">${esc(item.hint)}</span>` : ''}</div>`; }).join('') || '<div class="palette-empty">Ничего не найдено</div>';
+    input.setAttribute('aria-activedescendant', results.length ? `pal-opt-${active}` : '');
+    list.querySelector('.palette-item.active')?.scrollIntoView({ block: 'nearest' });
+  };
+  const search = () => {
+    const q = input.value.trim().toLocaleLowerCase('ru-RU');
+    const match = item => !q || item.hay.includes(q);
+    results = [...pages.filter(match).slice(0, q ? 6 : 8), ...tickets.filter(match).slice(0, q ? 6 : 5), ...chats.filter(match).slice(0, q ? 4 : 0)];
+    if (q) results.push({ group: 'Поиск', svg: icon('search'), label: `Искать «${input.value.trim()}» во всех заявках`, run: () => { state.search = input.value.trim(); state.filter = 'all'; state.owner = 'all'; setView('tickets'); } });
+    active = 0;
+    paint();
+  };
+  input.addEventListener('input', search);
+  input.addEventListener('keydown', e => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); if (!results.length) return; active = (active + (e.key === 'ArrowDown' ? 1 : -1) + results.length) % results.length; paint(); }
+    else if (e.key === 'Enter') { e.preventDefault(); runItem(results[active]); }
+    else if (e.key === 'Escape') { e.preventDefault(); close(); }
+    else if (e.key === 'Tab') e.preventDefault();
+  });
+  list.addEventListener('mousemove', e => { const el = e.target.closest('.palette-item'); if (el && Number(el.dataset.index) !== active) { active = Number(el.dataset.index); paint(); } });
+  list.addEventListener('click', e => { const el = e.target.closest('.palette-item'); if (el) runItem(results[Number(el.dataset.index)]); });
+  backdrop.addEventListener('mousedown', e => { if (e.target === backdrop) close(); });
+  search();
+  input.focus();
+}
+function maybeStartTour() { if (typeof clientTour !== 'undefined') clientTour.autostart(); }
+function startTour() { if (typeof clientTour !== 'undefined') clientTour.start(); }
+const SCROLL_AREAS = '.messages, .inbox-items, .internal-notes-list';
+function captureUi() {
+  const active = document.activeElement;
+  return {
+    scrollY: window.scrollY,
+    scrolls: [...document.querySelectorAll(SCROLL_AREAS)].map(el => el.scrollHeight - el.scrollTop - el.clientHeight < 40 ? 'bottom' : el.scrollTop),
+    focus: active?.id && active !== document.body ? { id: active.id, start: active.selectionStart, end: active.selectionEnd } : null,
+  };
+}
+function restoreUi(ui) {
+  window.scrollTo(0, ui.scrollY);
+  document.querySelectorAll(SCROLL_AREAS).forEach((el, i) => { const value = ui.scrolls[i]; if (value !== undefined) el.scrollTop = value === 'bottom' ? el.scrollHeight : value; });
+  const el = ui.focus && document.getElementById(ui.focus.id);
+  if (!el) return;
+  el.focus({ preventScroll: true });
+  if (ui.focus.start != null) try { el.setSelectionRange(ui.focus.start, ui.focus.end); } catch {}
+}
+const draftKey = name => `codari-draft-${state.user?.id}-${name}`;
+function bindDrafts(root = document) {
+  root.querySelectorAll('textarea[data-draft]').forEach(el => {
+    if (el.dataset.draftBound) return;
+    el.dataset.draftBound = '1';
+    try { const saved = localStorage.getItem(draftKey(el.dataset.draft)); if (saved && !el.value) el.value = saved; } catch {}
+    el.addEventListener('input', () => { try { el.value.trim() ? localStorage.setItem(draftKey(el.dataset.draft), el.value) : localStorage.removeItem(draftKey(el.dataset.draft)); } catch {} });
+  });
+}
+function bindTicketDraft(form){
+  const key=draftKey('ticket-form');
+  try{const data=JSON.parse(localStorage.getItem(key)||'null');if(data){Object.entries(data).forEach(([name,value])=>{const field=form.elements.namedItem(name);if(field&&field.type!=='file')field.value=value;});form.elements.service_type.dispatchEvent(new Event('change'));form.elements.customer_id?.dispatchEvent(new Event('change'));if(data.effort_hours)form.querySelector('.estimate-inline')?.setAttribute('open','');}}
+  catch{}
+  const save=()=>{const data={};for(const field of form.elements){if(field.name&&!['file','password'].includes(field.type))data[field.name]=field.value;}try{localStorage.setItem(key,JSON.stringify(data));}catch{}};
+  form.addEventListener('input',save);form.addEventListener('change',save);
+}
+function clearDraft(name) { try { localStorage.removeItem(draftKey(name)); } catch {} }
+/* ---------- Тема ---------- */
+const themeMedia = window.matchMedia('(prefers-color-scheme: dark)');
+const effectiveTheme = () => document.documentElement.dataset.theme || (themeMedia.matches ? 'dark' : 'light');
+function syncThemeUi() {
+  const dark = effectiveTheme() === 'dark';
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', dark ? '#181923' : '#f3f4f8');
+  const button = document.querySelector('#theme-toggle');
+  if (button) { button.innerHTML = icon(dark ? 'sun' : 'moon'); button.setAttribute('aria-label', dark ? 'Включить светлую тему' : 'Включить тёмную тему'); button.title = button.getAttribute('aria-label'); }
+}
+function toggleTheme() {
+  const next = effectiveTheme() === 'dark' ? 'light' : 'dark';
+  const root = document.documentElement;
+  if (!reduceMotion()) { root.classList.add('theme-switching'); setTimeout(() => root.classList.remove('theme-switching'), 350); }
+  root.dataset.theme = next;
+  try { localStorage.setItem('codari-theme', next); } catch {}
+  syncThemeUi();
+  toast(next === 'dark' ? 'Тёмная тема включена' : 'Светлая тема включена');
+}
+
+/* ---------- Скелетоны ---------- */
+let loadingTimer = null;
+function skeletonLines(count = 3) { return `<div class="skeleton-wrap" aria-busy="true"><span class="visually-hidden" role="status">Загрузка…</span>${Array.from({ length: count }, (_, i) => `<span class="skeleton" style="width:${[92, 76, 84, 64][i % 4]}%;height:12px"></span>`).join('')}</div>`; }
+function skeleton(kind) {
+  const line = (w, h = 12, extra = '') => `<span class="skeleton" style="width:${w};height:${h}px;${extra}"></span>`;
+  const stat = () => `<div class="stat skeleton-card">${line('55%')}${line('38%', 26)}${line('72%')}</div>`;
+  const rows = n => Array.from({ length: n }, () => `<div class="skeleton-row">${line('36px', 36, 'border-radius:10px')}<div class="skeleton-stack">${line('62%', 13)}${line('40%', 11)}</div>${line('96px', 24, 'border-radius:7px')}</div>`).join('');
+  const panel = n => `<section class="panel"><div class="toolbar">${line('30%', 16)}</div>${rows(n)}</section>`;
+  const card = () => `<section class="panel content skeleton-stack">${line('40%', 16)}${line('100%')}${line('86%')}${line('64%')}</section>`;
+  const stats = n => `<div class="stats ${n === 5 ? 'five' : ''}">${Array.from({ length: n }, stat).join('')}</div>`;
+  const inner = {
+    dashboard: `${stats(4)}<div class="workspace-grid">${panel(6)}<div class="context-stack">${card()}${card()}</div></div>`,
+    analytics: `${stats(5)}<div class="split"><div class="context-stack">${card()}${panel(4)}</div><div class="context-stack">${card()}${card()}</div></div>`,
+    billing: `<div class="billing-kpi-grid">${Array.from({ length: 4 }, stat).join('')}</div>${panel(5)}`,
+    cards: `<div class="kb-grid">${Array.from({ length: 6 }, card).join('')}</div>`,
+    detail: `<section class="ticket-progress">${line('100%', 28, 'border-radius:14px')}</section><div class="detail-grid"><div>${card()}${panel(3)}</div><div>${card()}${card()}</div></div>`,
+    list: panel(6),
+  }[kind] || panel(6);
+  return `<div class="skeleton-wrap" aria-busy="true"><span class="visually-hidden" role="status">Загрузка…</span>${inner}</div>`;
+}
+function delayedLoading(title, kind) {
+  clearTimeout(loadingTimer);
+  loadingTimer = setTimeout(() => { if (state.user) shell(title, '', skeleton(kind)); }, 180);
+}
+
+/* ---------- Перетаскивание файлов ---------- */
+const ALLOWED_FILES = ['.png', '.jpg', '.jpeg', '.webp', '.gif', '.pdf', '.txt', '.doc', '.docx', '.xls', '.xlsx', '.csv', '.zip'];
+function checkFiles(files) {
+  const ok = [], rejected = [];
+  files.forEach(file => { const ext = '.' + (file.name.split('.').pop() || '').toLowerCase(); (file.size > 10 * 1024 * 1024 || !ALLOWED_FILES.includes(ext) ? rejected : ok).push(file); });
+  if (rejected.length) toast(`Не подходят по формату или размеру (до 10 МБ): ${rejected.map(f => f.name).join(', ')}`, 'error');
+  return ok;
+}
+function bindDropzone(area, label, onFiles) {
+  if (!area) return;
+  area.classList.add('dropzone');
+  area.insertAdjacentHTML('beforeend', `<div class="drop-overlay" aria-hidden="true"><div>${icon('paperclip', 28)}<strong>${label}</strong><span>PNG, JPG, PDF, документы и архивы до 10 МБ</span></div></div>`);
+  let depth = 0;
+  const hasFiles = e => [...(e.dataTransfer?.types || [])].includes('Files');
+  area.addEventListener('dragenter', e => { if (!hasFiles(e)) return; e.preventDefault(); depth += 1; area.classList.add('dragging'); });
+  area.addEventListener('dragover', e => { if (!hasFiles(e)) return; e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; });
+  area.addEventListener('dragleave', e => { if (!hasFiles(e)) return; depth = Math.max(0, depth - 1); if (!depth) area.classList.remove('dragging'); });
+  area.addEventListener('drop', e => { if (!hasFiles(e)) return; e.preventDefault(); e.stopPropagation(); depth = 0; area.classList.remove('dragging'); const files = checkFiles([...e.dataTransfer.files]); if (files.length) onFiles(files); });
+}
+function bindChatFiles() {
+  const form = document.querySelector('#chat-message-form');
+  if (!form) return;
+  const input = form.elements.files;
+  const list = form.querySelector('#chat-files');
+  const paint = () => {
+    list.innerHTML = [...input.files].map((file, i) => `<span class="file-chip">${icon('paperclip', 13)}<span>${esc(file.name)}</span><button type="button" data-remove-file="${i}" aria-label="Убрать ${esc(file.name)}">×</button></span>`).join('');
+    list.querySelectorAll('[data-remove-file]').forEach(button => button.onclick = () => { const dt = new DataTransfer(); [...input.files].forEach((file, i) => { if (i !== Number(button.dataset.removeFile)) dt.items.add(file); }); input.files = dt.files; paint(); });
+  };
+  const add = files => { const dt = new DataTransfer(); [...input.files, ...files].forEach(file => dt.items.add(file)); input.files = dt.files; paint(); };
+  input.addEventListener('change', () => { const ok = checkFiles([...input.files]); if (ok.length !== input.files.length) { const dt = new DataTransfer(); ok.forEach(f => dt.items.add(f)); input.files = dt.files; } paint(); });
+  form.querySelector('textarea').addEventListener('paste', e => { const files = checkFiles([...(e.clipboardData?.files || [])]); if (files.length) { e.preventDefault(); add(files); toast(`Прикреплено файлов: ${files.length}`); } });
+  bindDropzone(document.querySelector('.inbox-thread'), 'Отпустите, чтобы приложить к сообщению', files => { add(files); toast(`Прикреплено файлов: ${files.length} — они уйдут с сообщением`); });
+}
+
+/* ---------- Push-уведомления ---------- */
+const pushSupported = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+const isIos = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const isStandalone = () => window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const base64ToBytes = value => { const raw = atob((value + '='.repeat((4 - value.length % 4) % 4)).replace(/-/g, '+').replace(/_/g, '/')); return Uint8Array.from(raw, c => c.charCodeAt(0)); };
+async function currentPushSubscription() {
+  if (!pushSupported()) return null;
+  const reg = await navigator.serviceWorker.getRegistration();
+  return reg ? reg.pushManager.getSubscription() : null;
+}
+async function savePushSubscription(subscription) {
+  const json = subscription.toJSON();
+  await api('/push/subscribe', { method: 'POST', body: JSON.stringify({ endpoint: json.endpoint, keys: json.keys }) });
+  state.pushEnabled = true;
+}
+async function enablePush() {
+  if (!pushSupported()) throw new Error(isIos() && !isStandalone() ? 'На iPhone сначала добавьте кабинет на экран «Домой» и откройте его оттуда' : 'Этот браузер не поддерживает push-уведомления');
+  const permission = await Notification.requestPermission();
+  if (permission !== 'granted') throw new Error('Уведомления не разрешены в браузере');
+  const { public_key } = await api('/push/key');
+  const key = base64ToBytes(public_key);
+  const reg = await navigator.serviceWorker.ready;
+  let subscription = await reg.pushManager.getSubscription();
+  const sameKey = subscription?.options?.applicationServerKey && new Uint8Array(subscription.options.applicationServerKey).every((byte, i) => byte === key[i]);
+  if (subscription && !sameKey) { await subscription.unsubscribe(); subscription = null; }
+  if (!subscription) subscription = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
+  await savePushSubscription(subscription);
+}
+async function disablePush() {
+  const subscription = await currentPushSubscription().catch(() => null);
+  if (subscription) {
+    await api('/push/unsubscribe', { method: 'POST', body: JSON.stringify({ endpoint: subscription.endpoint }) }).catch(() => {});
+    await subscription.unsubscribe().catch(() => {});
+  }
+  state.pushEnabled = false;
+}
+async function syncPush() {
+  try {
+    if (!pushSupported() || Notification.permission !== 'granted') return;
+    const subscription = await currentPushSubscription();
+    if (subscription) await savePushSubscription(subscription);
+  } catch {}
+}
+async function mountPushCard() {
+  const note = document.querySelector('.profile-layout > .profile-note');
+  if (!note) return;
+  const stack = document.createElement('div');
+  stack.className = 'context-stack';
+  note.replaceWith(stack);
+  stack.append(note);
+  stack.insertAdjacentHTML('beforeend', '<section class="panel content push-card" id="push-card" aria-live="polite"><div class="eyebrow">Уведомления на этом устройстве</div><h2>Push-уведомления</h2><div id="push-body">' + skeletonLines(2) + '</div></section>');
+  mountEmailCard(stack);
+  const body = stack.querySelector('#push-body');
+  const paint = async () => {
+    const subscription = await currentPushSubscription().catch(() => null);
+    state.pushEnabled = Boolean(subscription);
+    if (!pushSupported()) {
+      body.innerHTML = isIos() && !isStandalone()
+        ? '<p>На iPhone уведомления работают из приложения на экране «Домой».</p><ol class="push-steps"><li>Нажмите «Поделиться» в Safari.</li><li>Выберите «На экран „Домой“».</li><li>Откройте кабинет с экрана «Домой» и вернитесь сюда.</li></ol>'
+        : '<p>Этот браузер не поддерживает push-уведомления. Попробуйте Chrome, Edge, Firefox или Safari.</p>';
+    } else if (Notification.permission === 'denied') {
+      body.innerHTML = '<p>Уведомления запрещены в настройках браузера. Разрешите их для этого сайта и обновите страницу.</p>';
+    } else if (subscription) {
+      body.innerHTML = `<p class="push-on">${icon('check', 16)}Включены — новые события придут, даже если кабинет закрыт.</p><div class="row"><button class="button small" id="push-test">Проверить</button><button class="button small" id="push-off">Отключить</button></div>`;
+    } else {
+      body.innerHTML = '<p>Получайте новые сообщения, оценки и смены статуса на телефон или компьютер, даже когда кабинет закрыт.</p><button class="button primary" id="push-on">Включить уведомления</button>';
+    }
+    body.querySelector('#push-on')?.addEventListener('click', async e => { e.target.disabled = true; try { await enablePush(); toast('Уведомления включены'); } catch (error) { toast(error.message, 'error'); } paint(); });
+    body.querySelector('#push-off')?.addEventListener('click', async e => { e.target.disabled = true; await disablePush(); toast('Уведомления на этом устройстве отключены', 'info'); paint(); });
+    body.querySelector('#push-test')?.addEventListener('click', async e => { e.target.disabled = true; try { const { devices } = await api('/push/test', { method: 'POST' }); toast(devices ? 'Тестовое уведомление отправлено' : 'Устройство не подписано', devices ? 'success' : 'error'); } catch (error) { toast(error.message, 'error'); } e.target.disabled = false; });
+  };
+  paint();
+}
+function mountEmailCard(stack) {
+  stack.insertAdjacentHTML('beforeend', '<section class="panel content push-card email-card" id="email-card" aria-live="polite"><div class="eyebrow">Почта</div><h2>Письма о заявках</h2><div id="email-body">' + skeletonLines(2) + '</div></section>');
+  const body = stack.querySelector('#email-body');
+  const customer = state.user.role === 'customer';
+  const paint = async () => {
+    let p;
+    try { p = await api('/email/preferences'); } catch (error) { body.innerHTML = `<p>${esc(error.message)}</p>`; return; }
+    if (!p.available) {
+      body.innerHTML = `<p>${customer ? 'Отправка писем пока не настроена командой. Уведомления приходят в кабинет, push и мессенджеры.' : 'Почта не настроена: задайте SMTP_HOST и EMAIL_FROM на сервере (см. .env.example).'}</p>`;
+      return;
+    }
+    body.innerHTML = `<form class="form" id="email-form"><p>Письма приходят на <strong>${esc(p.email)}</strong>, только если вы не увидели событие в кабинете в течение пары минут.${p.replies ? ' На письмо можно просто ответить — ответ попадёт в переписку.' : ''}</p><label class="check-row"><input type="checkbox" name="notify" ${p.notify ? 'checked' : ''}>Сообщения, оценки и другие события по заявкам</label>${customer ? `<label class="check-row"><input type="checkbox" name="digest" ${p.digest ? 'checked' : ''}>Ежемесячная сводка: что сделано, что в работе и что ждёт вас</label><label>Копия сводки руководителю<input class="field" name="digest_emails" type="text" inputmode="email" autocomplete="off" value="${esc(p.digest_emails.join(', '))}" placeholder="director@company.ru"><small>До трёх адресов через запятую. Удобно для тех, кто не заходит в кабинет.</small></label><a class="text-link" href="/api/digest/preview" target="_blank" rel="noopener">Посмотреть сводку за этот месяц ↗</a>` : ''}<div class="row"><button class="button primary small">Сохранить</button><button class="button small" type="button" id="email-test">${icon('mail', 14)}Тестовое письмо</button></div></form>`;
+    const form = body.querySelector('#email-form');
+    form.onsubmit = async e => {
+      e.preventDefault();
+      const button = form.querySelector('button.primary');
+      button.disabled = true;
+      const emails = (form.elements.digest_emails?.value || '').split(/[,;\s]+/).map(x => x.trim()).filter(Boolean);
+      try { await api('/email/preferences', { method: 'PUT', body: JSON.stringify({ notify: form.elements.notify.checked, digest: Boolean(form.elements.digest?.checked), digest_emails: emails }) }); toast('Настройки писем сохранены'); paint(); }
+      catch (error) { toast(error.message, 'error'); button.disabled = false; }
+    };
+    form.querySelector('#email-test').onclick = async e => {
+      e.currentTarget.disabled = true;
+      try { const r = await api('/email/test', { method: 'POST' }); toast(`Письмо отправлено на ${r.email}`); } catch (error) { toast(error.message, 'error'); }
+      e.target.closest('button').disabled = false;
+    };
+  };
+  paint();
+}
+function bindCtrlEnter(formSelector) {
+  document.querySelector(`${formSelector} textarea`)?.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); e.target.form.requestSubmit(); } });
+}
 
 let audioCtx = null;
 function playNotificationSound() {
@@ -63,39 +424,41 @@ function formatDuration(ms) {
   return `${d} д ${h % 24} ч`;
 }
 
-function ticketSlaBadges(t) {
-  const badges = [];
+function ticketSla(t) {
   const now = Date.now();
-  if (!t.first_staff_response_at && t.response_due_at) {
-    const diff = new Date(t.response_due_at).getTime() - now;
-    if (diff < 0) {
-      badges.push(`<span class="sla-pill sla-overdue" title="Срок ответа: ${date(t.response_due_at)}">Ответ: -${formatDuration(Math.abs(diff))}</span>`);
-    } else {
-      const cls = diff < 2 * 3600 * 1000 ? 'sla-urgent' : 'sla-ontrack';
-      badges.push(`<span class="sla-pill ${cls}" title="Срок ответа: ${date(t.response_due_at)}">Ответ: ${formatDuration(diff)}</span>`);
-    }
-  }
-  if (!t.effort_minutes && t.estimate_due_at) {
-    const diff = new Date(t.estimate_due_at).getTime() - now;
-    if (diff < 0) {
-      badges.push(`<span class="sla-pill sla-overdue" title="Срок оценки: ${date(t.estimate_due_at)}">Оценка: -${formatDuration(Math.abs(diff))}</span>`);
-    } else {
-      const cls = diff < 4 * 3600 * 1000 ? 'sla-urgent' : 'sla-ontrack';
-      badges.push(`<span class="sla-pill ${cls}" title="Срок оценки: ${date(t.estimate_due_at)}">Оценка: ${formatDuration(diff)}</span>`);
-    }
-  }
-  if (t.delivery_due_at && t.status !== 'done' && t.status !== 'closed') {
-    const diff = new Date(t.delivery_due_at).getTime() - now;
-    if (diff < 0) {
-      badges.push(`<span class="sla-pill sla-overdue" title="Срок сдачи: ${date(t.delivery_due_at)}">Сдача: -${formatDuration(Math.abs(diff))}</span>`);
-    } else {
-      const cls = diff < 24 * 3600 * 1000 ? 'sla-urgent' : 'sla-ontrack';
-      badges.push(`<span class="sla-pill ${cls}" title="Срок сдачи: ${date(t.delivery_due_at)}">Сдача: ${formatDuration(diff)}</span>`);
-    }
-  }
-  return badges.join(' ');
+  const items = [];
+  const add = (label, due, warnMs) => {
+    const diff = new Date(due).getTime() - now;
+    items.push({ label, due, diff, tone: diff < 0 ? 'late' : diff < warnMs ? 'soon' : 'ok', text: diff < 0 ? `${label} −${formatDuration(-diff)}` : `${label} ${formatDuration(diff)}` });
+  };
+  if (!t.first_staff_response_at && t.response_due_at) add('Ответ', t.response_due_at, 2 * 3600 * 1000);
+  if (!t.effort_minutes && t.estimate_due_at) add('Оценка', t.estimate_due_at, 4 * 3600 * 1000);
+  if (t.delivery_due_at && t.status !== 'done' && t.status !== 'closed') add('Сдача', t.delivery_due_at, 24 * 3600 * 1000);
+  return items;
 }
-
+function nearestSla(t) { return ticketSla(t).sort((a, b) => a.diff - b.diff)[0] || null; }
+function slaTag(s) { return s ? `<span class="sla ${s.tone}" title="Срок: ${date(s.due)}">${icon('clock', 13)}${esc(s.text)}</span>` : ''; }
+function ticketSlaBadges(t) { return ticketSla(t).map(slaTag).join(' '); }
+function slaCard(t) {
+  if (t.declined) return '<p class="muted">Заказчик отказался от заявки — сроки больше не отслеживаются.</p>';
+  const now = Date.now();
+  const created = new Date(t.created_at).getTime();
+  const track = due => {
+    const end = new Date(due).getTime();
+    const diff = end - now;
+    const pct = Math.min(100, Math.max(4, (now - created) / Math.max(1, end - created) * 100));
+    return { text: diff < 0 ? `−${formatDuration(-diff)}` : `осталось ${formatDuration(diff)}`, tone: diff < 0 ? 'late' : pct > 75 ? 'soon' : 'ok', pct: diff < 0 ? 100 : pct, hint: `${diff < 0 ? 'Срок истёк' : 'Срок'}: ${date(due)}` };
+  };
+  const rows = [
+    ['Первый ответ', t.first_staff_response_at ? { text: '✓ ответили', tone: 'met', pct: 100, hint: date(t.first_staff_response_at) } : t.response_due_at ? track(t.response_due_at) : null],
+    ['Оценка', t.effort_minutes ? { text: '✓ подготовлена', tone: 'met', pct: 100 } : t.estimate_due_at ? track(t.estimate_due_at) : null],
+    ['Сдача', ['done', 'closed'].includes(t.status) ? { text: '✓ выполнена', tone: 'met', pct: 100 } : t.delivery_due_at ? track(t.delivery_due_at) : null],
+  ];
+  return rows.map(([label, s]) => `<div class="sla-row"><div class="sla-row-head"><strong>${label}</strong><span class="${s ? s.tone : 'none'}">${s ? esc(s.text) : 'не задан'}</span></div><div class="meter"><span class="${s && ['late', 'soon'].includes(s.tone) ? s.tone : ''}" style="width:${s ? s.pct : 0}%"></span></div>${s?.hint ? `<small>${esc(s.hint)}</small>` : ''}</div>`).join('');
+}
+function paintConnection(){
+  const el=document.querySelector('#connection-state');if(el)el.textContent=state.connection==='reconnecting'?'Связь потеряна · восстанавливаем':state.connection==='connecting'?'Подключаем обновления…':'Обновления включены';
+}
 let eventSource = null;
 function initRealtime() {
   if (eventSource) {
@@ -105,12 +468,27 @@ function initRealtime() {
   if (!state.user) return;
   try {
     eventSource = new EventSource('/api/events');
+    state.connection='connecting';
+    eventSource.onopen=()=>{state.connection='connected';paintConnection();};
+    eventSource.onerror=()=>{state.connection='reconnecting';paintConnection();};
     eventSource.addEventListener('update', async (e) => {
       try {
         const data = JSON.parse(e.data);
+        if(data.type==='team_updated'){if(!document.querySelector('#team-dialog'))await TeamUI.reload();return;}
+        if (data.type === 'read') {
+          const current = data.target === 'ticket' ? (state.view === 'detail' && state.current?.ticket.id === data.record_id ? state.current : null) : (state.view === 'chat' && state.currentChat?.chat.id === data.record_id ? state.currentChat : null);
+          if (current) { current.read_state = { customer_read_id: data.customer_read_id, team_read_id: data.team_read_id }; paintReadTicks(current.read_state); }
+          return;
+        }
+        if (data.type === 'meeting_summary') {
+          if (data.ticket_id && state.view === 'detail' && state.current?.ticket.id === data.ticket_id && !document.querySelector('#message-form textarea')?.value) await openTicket(data.ticket_id);
+          if (data.chat_id && state.view === 'chat' && state.currentChat?.chat.id === data.chat_id && !document.querySelector('#chat-message-form textarea')?.value) await openChat(data.chat_id);
+          return;
+        }
         playNotificationSound();
         if (data.type === 'notification') {
-          showBrowserNotification('Codari · Новое уведомление', data.text);
+          if (!state.pushEnabled) showBrowserNotification('Codari · Новое уведомление', data.text);
+          toast(data.text, 'info');
           await loadNotifications();
         } else if (data.type === 'ticket_message') {
           if (state.view === 'detail' && state.current && state.current.ticket.id === data.ticket_id) {
@@ -148,8 +526,10 @@ function initRealtime() {
   } catch (e) {}
 }
 async function api(path, options={}) {
-  const response = await fetch('/api' + path, {headers:{'Content-Type':'application/json'}, ...options});
-  if (!response.ok) { const data = await response.json().catch(()=>({})); throw new Error(typeof data.detail === 'string' ? data.detail : `Ошибка ${response.status}`); }
+  let response;
+  try{response=await fetch('/api' + path, {headers:options.body instanceof FormData?{}:{'Content-Type':'application/json'}, ...options});}
+  catch{throw new Error('Нет связи с сервером. Введённые данные сохранены; попробуйте ещё раз');}
+  if (!response.ok) { const data = await response.json().catch(()=>({})); const error=new Error(typeof data.detail === 'string' ? data.detail : Array.isArray(data.detail)?data.detail.map(x=>`${x.loc?.at(-1)||'Поле'}: ${x.msg}`).join('; '):`Ошибка ${response.status}`);error.status=response.status;throw error; }
   return response.json();
 }
 function notice() { return state.error ? `<div class="notice" role="alert">${esc(state.error)}</div>` : ''; }
@@ -159,167 +539,365 @@ async function upload(path, file, extra={}) {
   if(!response.ok){const data=await response.json().catch(()=>({}));throw new Error(typeof data.detail==='string'?data.detail:`Ошибка ${response.status}`);}
   return response.json();
 }
-function showError(error) { state.error = error.message || String(error); render(); }
-function setView(view) { state.view=view; state.error=''; render(); }
+function showError(error) {
+  state.error = error.message || String(error);
+  let host=document.querySelector('main')||document.querySelector('.auth-card')||app;
+  let alert=host.querySelector('.notice[role="alert"]');
+  if(!alert){alert=document.createElement('div');alert.className='notice';alert.setAttribute('role','alert');host.prepend(alert);}
+  alert.textContent=state.error;
+  host.querySelectorAll('button[data-submit-busy]').forEach(button=>{button.disabled=false;delete button.dataset.submitBusy;});
+  alert.scrollIntoView({block:'nearest'});
+}
+function syncRoute(){
+  if(!state.user||state.user.must_change_credentials||state.restoringRoute)return;
+  const route=state.view==='detail'?`ticket/${state.current?.ticket.id}`:state.view==='chat'?`chat/${state.currentChat?.chat.id}`:state.view==='task'?`task/${state.currentTaskId}`:state.view;
+  if(route&&!route.includes('undefined')&&location.hash!==`#${route}`)history.pushState(null,'',`#${route}`);
+}
+document.addEventListener('submit',event=>{event.target.querySelectorAll('button:not(:disabled)').forEach(button=>{button.dataset.submitBusy='true';});},true);
+document.addEventListener('click',event=>{const button=event.target.closest('button');if(button&&!button.disabled)button.dataset.submitBusy='true';},true);
+function setView(view) { state.view=view; state.error=''; syncRoute(); render(); }
+async function fetchNotifications() {
+  const [tickets, chats] = await Promise.all([api('/notifications'), api('/chat-notifications')]);
+  return [...tickets.map(n=>({...n,target:'ticket'})), ...chats.map(n=>({...n,target:'chat'}))].sort((a,b)=>b.created_at.localeCompare(a.created_at));
+}
 async function loadNotifications() {
   if (!state.user) return;
-  const incoming = [
-    ...(await api('/notifications')).map(n=>({...n,target:'ticket'})),
-    ...(await api('/chat-notifications')).map(n=>({...n,target:'chat'})),
-  ].sort((a,b)=>b.created_at.localeCompare(a.created_at));
+  const incoming = await fetchNotifications();
   const changed = JSON.stringify(incoming) !== JSON.stringify(state.notifications);
   state.notifications = incoming;
-  const unread = state.notifications.filter(n=>!n.read_at).length;
+  const unread = state.notifications.filter(n=>!n.read_at).length+(state.user.role!=='customer'?new Set((state.teamWorkspace?.events||[]).filter(e=>e.entity==='tasks'&&!e.read_at).map(e=>e.entity_id)).size:0);
   const count = document.querySelector('#notification-count');
+  const previous = Number(count?.textContent || 0);
   if (count) count.textContent = unread ? String(unread) : '';
+  if (count && unread > previous) { count.classList.remove('bump'); void count.offsetWidth; count.classList.add('bump'); }
   if (changed && state.view === 'notifications') renderNotifications();
 }
+function resetAccountState() {
+  TasksUI.reset();state.currentTaskId=null;TeamUI.reset();state.teamWorkspace=null;
+  for (const key of ['tickets','chats','queue','staff','customers','organizations','notifications','internalNotes','cannedResponses','kbCategories','kbArticles','gitLinks','webhooks','waiting']) state[key]=[];
+  for (const key of ['profile','current','currentChat','analytics','billing','bots','settings','kbReadingArticle','kbEditingArticle','replyTo']) state[key]=null;
+  state.pairings={};state.pendingOps={};state.loadFailures=[];state.readSent={};
+}
 async function refresh() {
-  state.tickets = await api('/tickets');
-  state.chats = await api('/chats');
-  state.organizations = await api('/organizations');
-  state.profile=await api(state.user.role==='customer'?'/customer-profile/me':'/profile/me');
+  const accountId=state.user?.id;
+  if(state.user?.must_change_credentials)return renderCredentials();
+  const staff=state.user.role!=='customer';
+  const requests={tickets:()=>api('/tickets'),chats:()=>api('/chats'),organizations:()=>api('/organizations'),profile:()=>api(staff?'/profile/me':'/customer-profile/me'),notifications:fetchNotifications,settings:()=>api('/public/settings')};
+  if(staff)Object.assign(requests,{staff:()=>api('/staff'),customers:()=>api('/customers'),queue:()=>api('/work-queue'),teamWorkspace:()=>api('/team')});
+  else requests.waiting=()=>api('/waiting-on-me');
+  const keys=Object.keys(requests);const results=await Promise.allSettled(keys.map(key=>requests[key]()));
+  if(!state.user||state.user.id!==accountId)return;
+  if(results.some(result=>result.status==='rejected'&&result.reason?.status===401)){state.user=null;resetAccountState();initRealtime();state.error='Сессия закончилась. Войдите снова.';renderAuth();return;}
+  state.loadFailures=[];
+  results.forEach((result,i)=>{const key=keys[i];if(result.status==='fulfilled')state[key]=result.value;else state.loadFailures.push(key);});
+  state.profile ||= {name:state.user.name,email:state.user.email,job_title:'',bio:''};
   state.user.name=state.profile.name;
-  if (state.user.role !== 'customer') {state.staff = await api('/staff');state.customers = await api('/customers');state.queue = await api('/work-queue');}
-  state.notifications = [
-    ...(await api('/notifications')).map(n=>({...n,target:'ticket'})),
-    ...(await api('/chat-notifications')).map(n=>({...n,target:'chat'})),
-  ].sort((a,b)=>b.created_at.localeCompare(a.created_at));
   render();
 }
+
 function renderAuth() {
+  const params = new URLSearchParams(location.search);
+  const tokenKind = params.has('invite') ? 'invite' : params.has('reset') ? 'reset' : null;
+  if (tokenKind || state.authMode === 'reset') { renderAccountAccess(tokenKind, params.get(tokenKind)); return; }
   const registration = state.authMode === 'register';
-  app.innerHTML = `<div class="auth"><div class="panel auth-card"><div class="brand auth-brand"><span class="brand-mark" aria-hidden="true">C</span><span class="brand-name">Codari<span class="brand-dot">.</span><small>Кабинет заявок</small></span></div><h1>${registration?'Создать кабинет':'Войти в кабинет'}</h1><div class="muted">Заявки и общение с командой в одном месте</div>${notice()}<form class="form" id="auth-form">${registration?'<label>Ваше имя<input class="field" name="name" required minlength="2" maxlength="100" autocomplete="name"></label>':''}<label>Email<input class="field" name="email" type="email" required autocomplete="email"></label><label>Пароль<input class="field" name="password" type="password" required minlength="8" autocomplete="${registration?'new-password':'current-password'}"></label><button class="button primary">${registration?'Зарегистрироваться':'Войти'}</button></form><button class="auth-switch" id="auth-switch">${registration?'Уже есть кабинет? Войти':'Нет кабинета? Зарегистрироваться'}</button></div></div>`;
-  document.querySelector('#auth-switch').onclick=()=>{state.authMode=registration?'login':'register';state.error='';renderAuth();};
-  document.querySelector('#auth-form').onsubmit=async e=>{e.preventDefault(); const button=e.target.querySelector('button');button.disabled=true;const data=Object.fromEntries(new FormData(e.target));try{state.user=await api(registration?'/register':'/login',{method:'POST',body:JSON.stringify(data)});state.view=state.user.role==='customer'?'tickets':'queue';state.error='';await refresh();await openHash();}catch(error){showError(error);}};
+  const feature = (ic, title, text) => `<div class="auth-feature"><i>${icon(ic)}</i><div><strong>${title}</strong><span>${text}</span></div></div>`;
+  app.innerHTML = `<div class="codari-auth"><header class="auth-heading"><a href="/landing" class="brand"><span class="brand-mark">C</span><span>Codari<span class="brand-dot">.</span></span></a><span>Рабочее пространство</span></header><main class="auth-main"><section class="auth-card"><div class="eyebrow">${registration?'Новый аккаунт':'Добро пожаловать'}</div><h1>${registration?'Создать кабинет':'Войти в Codari'}</h1><p class="lead">Заявки, договорённости и документы — в одном месте.</p>${notice()}<form class="form" id="auth-form">${registration?'<label>Ваше имя<input class="field" name="name" required minlength="2" maxlength="100" autocomplete="name"></label>':''}<label>Email<input class="field" name="email" type="email" required autocomplete="email" placeholder="name@company.ru"></label><label>Пароль<input class="field" name="password" type="password" required minlength="8" autocomplete="${registration?'new-password':'current-password'}"></label><label class="auth-password-check"><input type="checkbox" id="show-password">Показать пароль</label><button class="button primary">${registration?'Создать аккаунт':'Войти'}</button></form><div class="auth-divider"></div><p class="auth-register">${registration?'Уже зарегистрированы?':'Первый раз здесь?'} <button class="auth-switch" id="auth-switch" type="button">${registration?'Войти':'Создать аккаунт'}</button></p></section><p class="auth-caption">Обсуждайте задачи. Согласуйте объём. Следите за результатом.</p></main><footer class="auth-footer"><span>Codari · Кабинет клиента и команды</span><a href="/landing">О сервисе ↗</a></footer></div>`;
+  document.querySelector('#auth-switch').onclick = () => { state.authMode = registration ? 'login' : 'register'; state.error = ''; renderAuth(); };
+  document.querySelector('#show-password').onchange = e => { document.querySelector('#auth-form [name="password"]').type = e.target.checked ? 'text' : 'password'; };
+  document.querySelector('#auth-form').insertAdjacentHTML('beforeend', '<button type="button" class="auth-switch" id="forgot-password">Забыли пароль?</button>');
+  document.querySelector('#forgot-password').onclick = () => { state.authMode='reset';state.error='';renderAuth(); };
+  document.querySelector('#auth-form').onsubmit = async e => { e.preventDefault(); const button = e.target.querySelector('button.primary'); button.disabled = true; const data = Object.fromEntries(new FormData(e.target)); try { resetAccountState(); state.user = await api(registration ? '/register' : '/login', { method: 'POST', body: JSON.stringify(data) }); state.view = state.user.role === 'customer' ? 'tickets' : 'tasks'; state.error = ''; if(state.user.must_change_credentials){renderCredentials();return;} initRealtime();syncPush();state.restoringRoute=true;await refresh(); await openHash(); maybeStartTour(); } catch (error) { showError(error); } };
 }
-function shell(title, action, body) {
-  const staff=state.user.role!=='customer';
-  app.innerHTML=`<div class="shell"><aside><div class="brand"><span class="brand-mark" aria-hidden="true">C</span><span class="brand-name">Codari<span class="brand-dot">.</span><small>Кабинет заявок</small></span></div><nav class="nav"><button class="${state.view==='tickets'||state.view==='detail'?'active':''}" id="nav-tickets">Заявки</button>${staff&&state.user.role==='admin'?'<button class="'+(state.view==='team'?'active':'')+'" id="nav-team">Команда</button>':''}</nav><div class="aside-bottom"><div class="aside-user">${avatar(state.profile)}<div class="aside-user-meta"><strong>${esc(state.user.name)}</strong><small>${esc(staff?(state.profile?.job_title||'Сотрудник'):(state.organizations[0]?.name||state.profile?.company_name||'Заказчик'))}</small></div></div><button id="logout" class="aside-logout">Выйти</button></div></aside><main><div class="top"><div><div class="eyebrow">${staff?'Рабочее место':'Личный кабинет'}</div><h1>${esc(title)}</h1></div>${action||''}</div>${notice()}${body}</main></div>`;
-  const viewKey=`${state.view}:${title}`;
-  if(shell.lastViewKey!==viewKey){shell.lastViewKey=viewKey;app.querySelector('.shell').classList.add('view-enter');}
-  const unread = state.notifications.filter(n=>!n.read_at).length;
-  if(staff) document.querySelector('#nav-tickets').insertAdjacentHTML('beforebegin',`<button class="${state.view==='queue'?'active':''}" id="nav-queue">Дашборд</button>`);
-  document.querySelector('.nav').insertAdjacentHTML('beforeend',`<button class="${state.view==='chats'||state.view==='chat'?'active':''}" id="nav-chats">Общий чат</button>`);
-  document.querySelector('.nav').insertAdjacentHTML('beforeend',`<button class="${state.view==='notifications'?'active':''}" id="nav-notifications">Уведомления <span class="nav-count" id="notification-count">${unread||''}</span></button>`);
-  document.querySelector('.nav').insertAdjacentHTML('beforeend',`<button class="${state.view==='profile'?'active':''}" id="nav-profile">Мой профиль</button>`);
-  if((staff&&(state.user.role==='admin'||state.user.is_manager))||(!staff&&state.organizations.length)) document.querySelector('.nav').insertAdjacentHTML('beforeend',`<button class="${state.view==='organizations'?'active':''}" id="nav-organizations">${staff?'Компании':'Моя компания'}</button>`);
-  if(staff&&(state.user.role==='admin'||state.user.is_manager)) {
-    document.querySelector('.nav').insertAdjacentHTML('beforeend',`<button class="${state.view==='analytics'?'active':''}" id="nav-analytics">Аналитика</button>`);
-    document.querySelector('#nav-analytics')?.addEventListener('click',()=>openAnalytics());
-  }
-  document.querySelector('#nav-tickets').onclick=()=>setView('tickets');
-  document.querySelector('#nav-queue')?.addEventListener('click',()=>setView('queue'));
-  document.querySelector('#nav-team')?.addEventListener('click',()=>setView('team'));
-  document.querySelector('#nav-chats').onclick=async()=>{
-    if(state.user.role==='customer'){
-      try{const chat=await api('/chats',{method:'POST'});await refresh();await openChat(chat.id);}catch(error){showError(error);}
-    }else setView('chats');
+function renderAccountAccess(kind, token) {
+  const title = kind === 'invite' ? 'Добро пожаловать в кабинет' : kind === 'reset' ? 'Новый пароль' : 'Восстановить доступ';
+  app.innerHTML = `<main class="auth-main"><section class="auth-card"><h1>${title}</h1><p>${kind ? 'Задайте пароль от 8 символов. Ваши заявки и переписка сохранятся.' : 'Введите email для входа. Мы отправим ссылку для смены пароля.'}</p><div id="access-message" role="status" aria-live="polite"></div><form class="form" id="access-form">${kind ? '<label>Новый пароль<input class="field" name="password" type="password" required minlength="8" maxlength="128" autocomplete="new-password"></label><label>Повторите пароль<input class="field" name="repeat" type="password" required minlength="8" autocomplete="new-password"></label>' : '<label>Email<input class="field" name="email" type="email" required autocomplete="email"></label>'}<button class="button primary">${kind ? 'Сохранить пароль и войти' : 'Получить ссылку'}</button><button class="button" type="button" id="access-back">Ко входу</button></form></section></main>`;
+  document.querySelector('#access-back').onclick=()=>{history.replaceState(null,'',location.pathname);state.authMode='login';state.error='';renderAuth();};
+  document.querySelector('#access-form').onsubmit=async e=>{
+    e.preventDefault();const form=e.target;const button=form.querySelector('button.primary');button.disabled=true;
+    try{
+      if(kind){
+        if(form.elements.password.value!==form.elements.repeat.value)throw new Error('Пароли должны совпадать');
+        state.user=await api(`/account/activate/${kind}`,{method:'POST',body:JSON.stringify({token,password:form.elements.password.value})});
+        history.replaceState(null,'',location.pathname);state.view=state.user.role==='customer'?'tickets':'tasks';state.error='';initRealtime();syncPush();await refresh();maybeStartTour();
+      }else{
+        const result=await api('/account/reset-request',{method:'POST',body:JSON.stringify({email:form.elements.email.value})});
+        document.querySelector('#access-message').textContent=result.message;
+      }
+    }catch(error){document.querySelector('#access-message').textContent=error.message;}finally{button.disabled=false;}
   };
-  document.querySelector('#nav-notifications').onclick=()=>setView('notifications');
-  document.querySelector('#nav-profile')?.addEventListener('click',()=>setView('profile'));
-  document.querySelector('#nav-organizations')?.addEventListener('click',()=>setView('organizations'));
-  document.querySelector('.nav').insertAdjacentHTML('beforeend',`<button class="${state.view==='kb'?'active':''}" id="nav-kb">База знаний</button>`);
-  document.querySelector('#nav-kb')?.addEventListener('click',()=>openKb());
-  document.querySelector('.nav').insertAdjacentHTML('beforeend',`<button class="${state.view==='billing'?'active':''}" id="nav-billing">Биллинг и счета</button>`);
-  document.querySelector('#nav-billing')?.addEventListener('click',()=>openBilling());
-  if(staff&&state.user.role==='admin') {
-    document.querySelector('.nav').insertAdjacentHTML('beforeend',`<button class="${state.view==='webhooks'?'active':''}" id="nav-webhooks">Вебхуки</button>`);
-    document.querySelector('#nav-webhooks')?.addEventListener('click',()=>openWebhooks());
-  }
-  document.querySelector('.nav').insertAdjacentHTML('beforeend',`<button class="${state.view==='messengers'?'active':''}" id="nav-messengers">Мессенджеры</button>`);
-  document.querySelector('#nav-messengers').onclick=()=>openMessengers();
-  const navPaths = {
-    queue:'M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z',
-    tickets:'M9 11l3 3L22 4 M21 12v8H3V4h12',
-    chats:'M21 11a8 8 0 0 1-8 8H8l-5 3V11a8 8 0 0 1 8-8h2a8 8 0 0 1 8 8Z',
-    notifications:'M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9 M10 21h4',
-    profile:'M16 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0 M4 21v-3a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v3',
-    organizations:'M4 21V3h12v18 M16 9h4v12 M8 7h4 M8 11h4 M8 15h4 M2 21h20',
-    team:'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2 M13 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0 M22 21v-2a4 4 0 0 0-3-4 M17 3a4 4 0 0 1 0 8',
-    analytics:'M3 3v18h18 M7 14v3 M12 9v8 M17 5v12',
-    kb:'M3 4h7l2 2 2-2h7v16h-7l-2 2-2-2H3z M12 6v16',
-    billing:'M6 2h12v20l-3-2-3 2-3-2-3 2z M15 7h-4a2 2 0 0 0 0 4h2a2 2 0 0 1 0 4H9 M12 5v12',
-    webhooks:'M8 8l-5 4 5 4 M16 8l5 4-5 4 M14 4l-4 16',
-    messengers:'M22 2 9 15 M22 2l-8 20-5-7-7-5z'
+}
+
+function mountCustomerInvitation(host, organizationId = null, after = null) {
+  host.innerHTML=`<form class="form customer-invite-form"><p class="muted">Укажите имя и email. Если кабинет уже есть, подключим его; для нового клиента отправим приглашение. История сохраняется.</p><label>Имя<input class="field" name="name" required minlength="2" maxlength="100"></label><label>Email<input class="field" name="email" type="email" required></label>${organizationId?'<label>Роль в компании<select class="field" name="role"><option value="member">Участник</option><option value="viewer">Наблюдатель</option><option value="owner">Владелец</option></select></label>':'<label>Название компании (необязательно)<input class="field" name="company_name" maxlength="150" minlength="2"><small>Если указать компанию, клиент станет её владельцем. Без компании будет личный кабинет.</small></label>'}<button class="button primary">Добавить клиента</button></form><div class="invite-result" role="status" aria-live="polite"></div>`;
+  const form=host.querySelector('form');const result=host.querySelector('.invite-result');
+  form.onsubmit=async e=>{e.preventDefault();const button=form.querySelector('button');button.disabled=true;try{
+    const data=Object.fromEntries(new FormData(form));data.organization_id=organizationId;data.company_name=data.company_name||null;
+    const access=await api('/customer-invitations',{method:'POST',body:JSON.stringify(data)});
+    paintInvitationResult(result,access);
+    if(state.user.role!=='customer')state.customers=await api('/customers');state.organizations=await api('/organizations');if(after)after(access);
+    if(state.view==='organizations'){const saved=result.innerHTML;renderOrganizations();const target=document.querySelector(`[data-invite-host="${organizationId||'new'}"] .invite-result`);if(target){paintInvitationResult(target,access);const disclosure=target.closest('details');if(disclosure)disclosure.open=true;target.scrollIntoView({block:'nearest'});}}
+  }catch(error){result.textContent=error.message;}finally{button.disabled=false;}};
+}
+function paintInvitationResult(result,access){
+  result.innerHTML=access.registered?'<p>Кабинет уже существует. Клиент подключён; пароль и история сохранены.</p>':`<p>Кабинет создан. Приглашение поставлено в очередь почты.</p><label>Ссылка приглашения<input class="field" readonly value="${esc(access.url)}"></label><button type="button" class="button small" data-copy-invite>Скопировать ссылку</button><p class="muted">До ${date(access.expires_at)}. Для активации клиент задаст пароль.</p>`;
+  result.querySelector('[data-copy-invite]')?.addEventListener('click',async()=>{try{await navigator.clipboard.writeText(access.url);toast('Ссылка скопирована');}catch{result.querySelector('input').select();toast('Выделили ссылку — скопируйте её');}});
+}
+async function mountInvitationList(){
+  const host=document.querySelector('#invitation-list');if(!host)return;
+  try{const list=await api('/customer-invitations');if(!host.isConnected)return;
+    const statuses={pending:'Ожидает первого входа',expired:'Приглашение истекло',activated:'Кабинет активирован'};
+    const deliveries={pending:'В очереди отправки',sending:'Отправляется',sent:'Письмо отправлено',failed:'Ошибка доставки',dead:'Ошибка доставки'};
+    host.innerHTML=list.length?list.map(item=>`<section class="content"><strong>${esc(item.name)}</strong><p>${esc(item.email)} · ${statuses[item.status]}</p><p class="muted">${deliveries[item.delivery_state]||'Статус доставки уточняется'}${item.expires_at?' · до '+date(item.expires_at):''}</p>${item.status!=='activated'?`<button class="button small" data-resend-invite="${item.customer_id}">Отправить новое приглашение</button><div data-invite-result="${item.customer_id}" role="status"></div>`:''}</section>`).join(''):'<p class="muted">Приглашений пока нет.</p>';
+    host.querySelectorAll('[data-resend-invite]').forEach(button=>button.onclick=async()=>{const item=list.find(x=>x.customer_id===Number(button.dataset.resendInvite));button.disabled=true;try{const access=await api('/customer-invitations',{method:'POST',body:JSON.stringify({name:item.name,email:item.email,organization_id:item.organization_id,role:item.role||'member'})});paintInvitationResult(host.querySelector(`[data-invite-result="${item.customer_id}"]`),access);button.textContent='Новое приглашение подготовлено';}catch(error){showError(error);}finally{button.disabled=false;}});
+  }catch(error){host.textContent=error.message;}
+}
+
+function shell(title, action, body, opts = {}) {
+  const staff = state.user.role !== 'customer';
+  const admin = state.user.role === 'admin';
+  const dispatcher = isDispatcher();
+  const v = state.view;
+  const unread = state.notifications.filter(n => !n.read_at).length+(staff?new Set((state.teamWorkspace?.events||[]).filter(e=>e.entity==='tasks'&&!e.read_at).map(e=>e.entity_id)).size:0);
+  const chatUnread = state.notifications.filter(n => n.target === 'chat' && !n.read_at).length;
+  const activeTasks=(state.teamWorkspace?.tasks||[]).filter(t=>t.status!=='done'&&t.status!=='cancelled'&&(t.owner_id===state.user.id||t.participants.includes(state.user.id)||(t.reviewer_id===state.user.id&&t.status==='review'))).length;
+    const activeTickets = state.tickets.filter(t => !['done', 'closed'].includes(t.status)).length;
+  const ticketsActive = ['tickets', 'detail', 'new'].includes(v);
+  const chatsActive = ['chats', 'chat'].includes(v);
+  const item = (id, label, ic, active, count, tone = '') => `<button class="nav-item ${active ? 'active' : ''}" id="nav-${id}" data-nav="${id}" ${active ? 'aria-current="page"' : ''}>${icon(ic)}<span>${label}</span>${count ? `<span class="nav-count ${tone}">${count}</span>` : ''}</button>`;
+  const groups = [
+    ['Обращения', [staff && item('queue', 'Входящие', 'queue', v === 'queue', state.queue.length), item('tickets', staff ? 'Заявки клиентов' : 'Мои заявки', 'ticket', ticketsActive, activeTickets), item('chats', 'Переписка', 'chat', chatsActive, chatUnread)]],
+    ['Команда и работа', [staff && item('tasks', 'Задачи', 'check', ['tasks','task'].includes(v), activeTasks), staff && item('team', 'Команда, встречи и сделки', 'users', v === 'team')]],
+    ['Клиенты', [(dispatcher || (!staff && state.organizations.length)) && item('organizations', staff ? 'Компании' : 'Моя компания', 'building', v === 'organizations'), item('kb', 'Справочник', 'book', v === 'kb')]],
+    ['Финансы', [billingOn() && item('billing', 'Баланс и документы', 'wallet', v === 'billing'), staff && dispatcher && item('analytics', 'Отчёты', 'chart', v === 'analytics')]],
+    ['Настройки', [item('messengers', 'Каналы связи', 'send', v === 'messengers'), admin && item('webhooks', 'Интеграции', 'link', v === 'webhooks')]],
+  ].map(([label, items]) => { const list = items.filter(Boolean); return list.length ? `<details class="nav-cluster ${list.some(x=>x.includes('aria-current'))?'selected':''}"><summary>${label}${icon('chevron',12)}</summary><div class="nav-cluster-menu">${list.join('')}</div></details>` : ''; }).join('');
+  const tab = (id, label, ic, active, count) => `<button class="${active ? 'active' : ''}" data-nav="${id}" ${active ? 'aria-current="page"' : ''}>${icon(ic, 22)}${label}${count ? `<span class="dot-count">${count}</span>` : ''}</button>`;
+  const tabs = [
+    staff ? tab('tasks', 'Задачи', 'check', ['tasks','task'].includes(v)) : tab('tickets', 'Заявки', 'ticket', ticketsActive),
+    staff ? tab('tickets', 'Заявки', 'ticket', ticketsActive) : tab('notifications', 'События', 'bell', v === 'notifications', unread),
+    tab('chats', 'Чат', 'chat', chatsActive, chatUnread),
+    billingOn() ? tab('billing', 'Счета', 'wallet', v === 'billing') : staff ? tab('notifications', 'События', 'bell', v === 'notifications', unread) : tab('profile', 'Профиль', 'user', v === 'profile'),
+    `<button data-nav-toggle aria-controls="sidebar">${icon('more', 22)}Ещё</button>`,
+  ].join('');
+  const role = admin ? 'Администратор' : state.user.is_manager ? 'Менеджер' : 'Сотрудник';
+  const subtitle = staff ? (state.profile?.job_title || role) : (state.organizations[0]?.name || state.profile?.company_name || 'Заказчик');
+  const kicker = opts.kicker ?? (staff ? 'Рабочее место' : 'Личный кабинет');
+  const viewKey = `${v}:${v === 'detail' ? state.current?.ticket?.id : v === 'chat' ? state.currentChat?.chat?.id : v==='task'?state.currentTaskId:''}`;
+  clearTimeout(loadingTimer);
+  const preserved = viewKey === lastViewKey ? captureUi() : null;
+  const entering = viewKey !== lastViewKey && !reduceMotion();
+  lastViewKey = viewKey;
+  document.body.classList.remove('nav-open');
+  app.innerHTML = `<div class="shell"><aside id="sidebar" class="codari-masthead" aria-label="Основное меню"><div class="brand"><span class="brand-mark" aria-hidden="true">C</span><span><span class="brand-name">Codari<span class="brand-dot">.</span></span><small>Рабочее пространство</small></span></div><nav class="nav" aria-label="Разделы">${groups}</nav><div class="aside-bottom aside-user">${avatar(state.profile, 'small')}<div class="aside-user-meta"><strong>${esc(state.user.name)}</strong><small>${esc(subtitle)}</small></div><button id="theme-toggle" class="aside-logout" aria-label="Сменить тему">${icon(effectiveTheme() === 'dark' ? 'sun' : 'moon')}</button><button id="logout" class="aside-logout" aria-label="Выйти" title="Выйти">${icon('logout')}</button></div></aside><div class="nav-backdrop" data-nav-close></div><div class="workspace"><header class="topbar"><button class="icon-btn menu-btn" data-nav-toggle aria-controls="sidebar" aria-label="Открыть меню">${icon('menu')}</button><button type="button" class="global-search" id="open-palette" aria-haspopup="dialog">${icon('search', 17)}<span class="global-search-text">Поиск задач, заявок и разделов</span><kbd>Ctrl K</kbd></button><span class="topbar-spacer"></span><span id="connection-state" class="muted connection-state" role="status"></span><button class="button primary" id="top-new-ticket" aria-label="${staff?'Новая задача':'Новая заявка'}">${icon('plus', 16)}<span>${staff?'Новая задача':'Новая заявка'}</span></button>${staff ? '' : `<button class="icon-btn" id="tour-restart" aria-label="Пройти обучение по кабинету" title="Обучение по кабинету">${icon('help')}</button>`}<button class="icon-btn ${v === 'notifications' ? 'active' : ''}" data-nav="notifications" aria-label="Уведомления${unread ? `: ${unread} новых` : ''}">${icon('bell')}<span class="dot-count" id="notification-count">${unread || ''}</span></button><button class="top-profile ${v === 'profile' ? 'active' : ''}" data-nav="profile" aria-label="Мой профиль">${avatar(state.profile, 'small')}${icon('chevron', 14)}</button></header><main id="main" class="${entering ? 'is-entering' : ''}">${opts.crumbs ? `<nav class="crumbs" aria-label="Навигационная цепочка">${opts.crumbs}</nav>` : ''}<div class="top"><div class="top-text">${opts.badges ? `<div class="top-badges">${opts.badges}</div>` : kicker ? `<div class="eyebrow">${kicker}</div>` : ''}<h1>${esc(title)}</h1>${opts.lead ? `<p class="lead">${opts.lead}</p>` : ''}</div>${action ? `<div class="top-actions">${action}</div>` : ''}</div>${notice()}${state.loadFailures?.length?'<div class="notice" role="status">Часть данных не обновилась. Доступные данные сохранены. <button class="button small" id="retry-load">Повторить загрузку</button></div>':''}${body}</main></div><nav class="tabbar" aria-label="Быстрая навигация">${tabs}</nav></div>`;
+  document.querySelector('#retry-load')?.addEventListener('click',()=>refresh());
+  const navActions = {
+    tasks: () => setView('tasks'), queue: () => setView('queue'), tickets: () => setView('tickets'), notifications: () => setView('notifications'), profile: () => setView('profile'),
+    organizations: () => setView('organizations'), team: () => setView('team'), kb: () => openKb(), billing: () => billingOn() ? openBilling() : setView('tickets'),
+    analytics: () => openAnalytics(), webhooks: () => openWebhooks(), messengers: () => openMessengers(),
+    chats: async () => { if (staff) return setView('chats'); try { const chat = await api('/chats', { method: 'POST' }); await refresh(); await openChat(chat.id); } catch (error) { showError(error); } },
   };
-  document.querySelectorAll('.nav button').forEach(button=>{
-    const path=navPaths[button.id.replace('nav-','')];
-    if(path) button.insertAdjacentHTML('afterbegin',`<svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${path}"/></svg>`);
-  });
-  document.querySelector('#logout').onclick=async()=>{await api('/logout',{method:'POST'});state.user=null;state.current=null;state.bots=null;state.pairings={};state.pendingOps={};state.error='';renderAuth();};
+  document.querySelectorAll('[data-nav]').forEach(button => button.onclick = () => { document.querySelectorAll('.nav-cluster[open]').forEach(x=>x.open=false); document.body.classList.remove('nav-open'); navActions[button.dataset.nav]?.(); });
+  const syncNavigation = () => {
+    const open=document.body.classList.contains('nav-open');
+    document.querySelector('#sidebar').inert=window.matchMedia('(max-width:1100px)').matches&&!open;
+    document.querySelectorAll('[data-nav-toggle]').forEach(button=>button.setAttribute('aria-expanded',String(open)));
+  };
+  document.querySelectorAll('[data-nav-toggle]').forEach(button => button.onclick = () => {document.body.classList.toggle('nav-open');syncNavigation();});
+  syncNavigation();
+  document.querySelector('[data-nav-close]').onclick = () => {document.body.classList.remove('nav-open');syncNavigation();};
+  document.querySelectorAll('.nav-cluster').forEach(cluster=>cluster.addEventListener('toggle',()=>{if(cluster.open)document.querySelectorAll('.nav-cluster').forEach(other=>{if(other!==cluster)other.open=false;});}));
+  document.querySelector('#top-new-ticket').onclick = () => staff?TasksUI.quickCreate():setView('new');
+  document.querySelector('#open-palette').onclick = () => openPalette();
+  document.querySelector('#tour-restart')?.addEventListener('click', () => startTour());
+  document.querySelector('#theme-toggle').onclick = toggleTheme;
+  syncThemeUi();paintConnection();
+  if (entering) queueMicrotask(animateEntrance);
+  queueMicrotask(() => { bindDrafts(); if (preserved) restoreUi(preserved); });
+  document.querySelector('#logout').onclick = async () => { await disablePush(); await api('/logout', { method: 'POST' }); state.user = null; resetAccountState();initRealtime();state.current = null; state.bots = null; state.pairings = {}; state.pendingOps = {}; state.error = ''; renderAuth(); };
 }
 function recentActivity() {
-  const items=state.notifications.slice(0,3).map(n=>`<div class="activity-item"><span class="activity-dot ${n.read_at?'':'fresh'}"></span><div><strong>${esc(n.text)}</strong><small>${date(n.created_at)}</small></div></div>`).join('');
-  return `<section class="activity-panel"><div class="activity-heading"><h2>Последние события</h2><span>${state.notifications.length}</span></div>${items||'<p class="muted">Новых событий пока нет.</p>'}</section>`;
+  const items = state.notifications.slice(0, 3).map(n => `<div class="activity-item"><span class="activity-dot ${n.read_at ? '' : 'fresh'}"></span><div><strong>${esc(n.text)}</strong><small>${date(n.created_at)}</small></div></div>`).join('');
+  return `<section class="activity-panel"><div class="activity-heading"><h2>Последние события</h2><span>${state.notifications.length ? `всего ${state.notifications.length}` : ''}</span></div>${items || '<p class="muted">Новых событий пока нет.</p>'}</section>`;
 }
-function portfolioOverview() { return queueOverview(); }
-function queueOverview() {
-  const cards=[
-    {label:'Активные заявки',value:state.tickets.filter(t=>!['done','closed'].includes(t.status)).length,hint:state.user.role==='customer'?`В работе: ${state.tickets.filter(t=>t.status==='working').length}`:`${state.queue.filter(item=>item.priority<=1).length} требуют внимания`,tone:'blue',path:'M8 6V3h8v3 M3 6h18v15H3z M8 6v15 M16 6v15'},
-    {label:'Согласовано часов',value:hours(state.tickets.filter(t=>t.estimate_state==='approved').reduce((sum,t)=>sum+(t.effort_minutes||0),0)),hint:'По одобренным оценкам',tone:'violet',path:'M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0 M12 6v6l4 2'},
-    {label:'Ожидают согласования',value:state.tickets.filter(t=>t.estimate_state==='pending').length,hint:'Оценки отправлены заказчикам',tone:'green',path:'M14 2H5v20h14V7z M14 2v5h5 M8 12h8 M8 16h8'}
-  ];
-  return `<section class="codari-stats" aria-label="Сводка рабочей очереди">${cards.map(card=>`<div class="codari-stat"><span class="stat-icon ${card.tone}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${card.path}"/></svg></span><span class="overview-kicker">${card.label}</span><strong>${card.value}</strong><small>${card.hint}</small></div>`).join('')}</section>`;
+function portfolioOverview(all) {
+  const staff = state.user.role !== 'customer';
+  const total = all.length;
+  const done = all.filter(t => ['done', 'closed'].includes(t.status)).length;
+  const approvedTickets = all.filter(t => t.estimate_state === 'approved');
+  const approved = approvedTickets.reduce((sum, t) => sum + (t.effort_minutes || 0), 0);
+  const pending = all.filter(t => t.estimate_state === 'pending' && (staff || t.can_decide));
+  const pendingMinutes = pending.reduce((sum, t) => sum + (t.effort_minutes || 0), 0);
+  const parts = Object.keys(statusChipNames).map(key => ({ key, label: statusChipNames[key], count: all.filter(t => t.status === key).length }));
+  const chart = parts.filter(p => p.count).map(p => `<button class="portfolio-segment ${p.key}" data-overview-filter="${p.key}" style="width:${p.count / total * 100}%" aria-label="${p.label}: ${p.count}" title="${p.label}: ${p.count}"></button>`).join('');
+  return `<section class="panel overview-card" aria-label="Сводка по заявкам"><div><div class="overview-head"><span class="eyebrow">По статусам</span><strong>${total} ${plural(total, ['заявка', 'заявки', 'заявок'])} · ${done} завершено</strong></div><div class="portfolio-track" role="group" aria-label="Фильтр по статусам заявок">${chart}</div><div class="portfolio-legends">${parts.map(p => `<span>${p.label} <strong>${p.count}</strong></span>`).join('')}</div></div><div><span class="eyebrow">Согласовано часов</span><strong class="big">${hours(approved)}</strong><span class="muted">${approvedTickets.length ? `по ${approvedTickets.length} ${plural(approvedTickets.length, ['заявке', 'заявкам', 'заявкам'])}` : 'Пока нет согласованных оценок'}</span></div><div><span class="eyebrow">${staff ? 'Ждут решения заказчика' : 'Ждут вашего решения'}</span><strong class="big">${pending.length} ${plural(pending.length, ['оценка', 'оценки', 'оценок'])}</strong><span class="muted">${pending.length ? `на ${hours(pendingMinutes)}` : 'Нет оценок на согласовании'}</span></div></section>`;
 }
-function workloadPanel(){
-  const people=state.staff.filter(person=>person.role!=='admin'||state.queue.some(item=>item.assignee_id===person.id));
-  const rows=people.map(person=>{const assigned=state.queue.filter(item=>item.source==='ticket'&&item.assignee_id===person.id);const urgent=assigned.filter(item=>item.priority<=1).length;return `<div class="workload-person"><span>${avatar(person)}<strong>${esc(person.name)}</strong></span><span><b>${assigned.length}</b> заявок${urgent?` · <b class="workload-urgent">${urgent} срочно</b>`:''}</span></div>`;}).join('');
-  const overdue=state.queue.filter(item=>item.overdue).length;
-  return `<section class="activity-panel"><div class="activity-heading"><h2>Нагрузка команды</h2><span>${overdue?`${overdue} просрочено`:state.queue.filter(item=>item.source==='ticket').length+' заявок'}</span></div>${rows||'<p class="muted">Нет назначенных заявок.</p>'}</section>`;
+function queueItemSla(item) {
+  if (item.source === 'ticket') { const t = state.tickets.find(x => x.id === item.id); const s = t && nearestSla(t); if (s) return s; }
+  if (item.deadline) { const diff = new Date(item.deadline).getTime() - Date.now(); return { due: item.deadline, diff, tone: diff < 0 ? 'late' : diff < 24 * 3600 * 1000 ? 'soon' : 'ok', text: diff < 0 ? `Срок −${formatDuration(-diff)}` : `Срок ${formatDuration(diff)}` }; }
+  return null;
+}
+function workloadPanel() {
+  const people = state.staff.filter(person => person.role !== 'admin' || state.queue.some(item => item.assignee_id === person.id));
+  const load = people.map(person => { const assigned = state.queue.filter(item => item.source === 'ticket' && item.assignee_id === person.id); return { person, count: assigned.length, urgent: assigned.filter(item => item.priority <= 1).length }; });
+  const unassigned = state.queue.filter(item => item.source === 'ticket' && !item.assignee_id).length;
+  const max = Math.max(1, unassigned, ...load.map(x => x.count));
+  const rows = load.map(({ person, count, urgent }) => `${avatar(person, 'small')}<div class="workload-name">${esc(person.name)}<div class="meter"><span style="width:${count / max * 100}%"></span></div></div><span class="workload-count"><strong>${count}</strong>${urgent ? ` · <span class="workload-urgent">${urgent} срочно</span>` : ''}</span>`).join('');
+  const none = unassigned ? `<span class="person-avatar small vacant" aria-hidden="true">+</span><div class="workload-name unassigned">Не назначены<div class="meter"><span class="soon" style="width:${unassigned / max * 100}%"></span></div></div><span class="workload-count"><strong>${unassigned}</strong></span>` : '';
+  return `<section class="activity-panel"><div class="activity-heading"><h2>Нагрузка команды</h2><span>заявки в очереди</span></div>${rows || none ? `<div class="workload">${rows}${none}</div>` : '<p class="muted">Нет назначенных заявок.</p>'}</section>`;
+}
+const waitingIcons = { estimate: 'clock', hours: 'clock', acceptance: 'check', answer: 'chat' };
+function waitingAge(iso) {
+  const days = Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
+  return { days, text: days < 1 ? 'с сегодняшнего дня' : `ждёт ${days} ${plural(days, ['день', 'дня', 'дней'])}` };
+}
+function waitingPanel() {
+  const items = state.waiting || [];
+  if (!items.length) return state.tickets.some(t => t.status !== 'closed') ? `<section class="waiting-panel clear" aria-label="Ждём от вас">${icon('check', 18)}<div><strong>От вас сейчас ничего не нужно</strong><span>Команда работает. Если понадобится ваше решение, заявка появится здесь.</span></div></section>` : '';
+  const rows = items.map(w => {
+    const age = waitingAge(w.since);
+    return `<button type="button" class="waiting-row" data-waiting-ticket="${w.ticket_id}"><span class="waiting-ico ${w.kind}">${icon(waitingIcons[w.kind] || 'alert', 17)}</span><span class="waiting-text"><strong>${esc(w.action)}</strong><small>№${w.ticket_id} · ${esc(w.title)}</small><small class="waiting-detail">${esc(w.detail)}</small></span><span class="waiting-age ${age.days >= 2 ? 'late' : ''}">${age.text}</span><span class="waiting-go">${icon('arrow', 16)}</span></button>`;
+  }).join('');
+  const estimates = items.filter(w => w.kind === 'estimate');
+  const total = estimates.reduce((sum, w) => sum + (w.effort_minutes || 0), 0);
+  const bulk = estimates.length > 1 ? `<div class="waiting-bulk"><span><strong>${estimates.length} ${plural(estimates.length, ['оценка', 'оценки', 'оценок'])}</strong> на ${hours(total)} ждут одобрения</span><button type="button" class="button primary" id="approve-all">${icon('check', 16)}Одобрить все</button><button type="button" class="button primary" id="approve-all-confirm" hidden>Подтвердить: ${hours(total)}</button><button type="button" class="button" id="approve-all-cancel" hidden>Отмена</button></div>` : '';
+  return `<section class="panel waiting-panel" aria-labelledby="waiting-title"><div class="waiting-head"><div><span class="eyebrow">Ваше действие</span><h2 id="waiting-title">Ждём от вас</h2></div><span class="waiting-count" aria-label="${items.length} ${plural(items.length, ['шаг', 'шага', 'шагов'])}">${items.length}</span></div><div class="waiting-list">${rows}</div>${bulk}<p class="waiting-hint">Пока эти шаги не сделаны, работа по заявкам стоит.</p></section>`;
+}
+function bindWaitingBulk() {
+  const start = document.querySelector('#approve-all');
+  if (!start) return;
+  const confirm = document.querySelector('#approve-all-confirm');
+  const cancel = document.querySelector('#approve-all-cancel');
+  const toggle = asking => { start.hidden = asking; confirm.hidden = !asking; cancel.hidden = !asking; };
+  start.onclick = () => { toggle(true); confirm.focus(); };
+  cancel.onclick = () => toggle(false);
+  confirm.onclick = async () => {
+    confirm.disabled = true;
+    const ids = (state.waiting || []).filter(w => w.kind === 'estimate').map(w => w.ref_id);
+    try { const result = await api('/estimates/approve', { method: 'POST', body: JSON.stringify({ estimate_ids: ids }) }); toast(`Одобрено оценок: ${result.approved} — команда приступит к работе`); await refresh(); }
+    catch (error) { showError(error); await refresh(); }
+  };
 }
 function renderTickets() {
-  const staff=state.user.role!=='customer';
-  const dispatcher=state.user.role==='admin'||state.user.is_manager;
-  const visible=state.tickets.filter(t=>state.filter==='all'||(state.filter==='mine'&&t.assignee_id===state.user.id)||(state.filter==='unassigned'&&!t.assignee_id)||t.status===state.filter);
-  const ticketRow=t=>{
-    const sla=ticketSlaBadges(t);
-    return `<button class="ticket-row" data-ticket="${t.id}"><span><strong>№${t.id} · ${esc(t.title)}</strong><small>${esc(t.next_step||t.customer_name)} · ${date(t.updated_at)} ${sla?`· ${sla}`:''}</small></span><span class="badge ${esc(t.status)}">${statusNames[t.status]}</span><span class="muted hide-mobile">${esc(t.assignee_name||'Без ответственного')}</span><span class="muted hide-mobile">${date(t.created_at)}</span></button>`;
+  const staff = state.user.role !== 'customer';
+  const dispatcher = isDispatcher();
+  const owned = state.tickets.filter(t => state.owner === 'mine' ? t.assignee_id === state.user.id : state.owner === 'unassigned' ? !t.assignee_id : true);
+  if (!statusChipNames[state.filter]) state.filter = 'all';
+  const visible = owned.filter(t => state.filter === 'all' || t.status === state.filter);
+  const chip = (key, label, count, dot = '') => `<button type="button" class="chip ${state.filter === key ? 'active' : ''}" data-status-filter="${key}" aria-pressed="${state.filter === key}">${dot ? `<span class="dot ${dot}"></span>` : ''}${label} <i>${count}</i></button>`;
+  const chips = chip('all', 'Все', owned.length) + Object.entries(statusChipNames).map(([key, label]) => chip(key, label, owned.filter(t => t.status === key).length, key)).join('');
+  const ownerSelect = staff ? `<label class="select-inline"><span>Ответственный</span><select id="owner-filter"><option value="all">Все</option><option value="mine">Мои</option>${dispatcher ? '<option value="unassigned">Без ответственного</option>' : ''}</select></label>` : '';
+  const ticketRow = t => {
+    const sla = nearestSla(t);
+    const finished = ['done', 'closed'].includes(t.status);
+    const deadline = sla ? slaTag(sla) : finished ? `<span class="sla met">${icon('check', 13)}Завершена</span>` : `<span class="tdate">${esc(t.next_step || '—')}</span>`;
+    return `<button class="trow" data-ticket="${t.id}"><span class="tnum">${t.id}</span><span class="ttitle"><strong>${esc(t.title)}</strong><small>${esc([t.customer_name, staff ? t.customer_company : '', serviceLabel(t.service_type)].filter(Boolean).join(' · '))}</small></span><span class="badge ${esc(t.status)}">${statusNames[t.status]}</span><span>${deadline}</span><span class="tnum-strong">${t.effort_minutes ? hours(t.effort_minutes) : '—'}</span>${staff ? `<span class="twho">${avatarOf(t.assignee_id, t.assignee_name)}<span>${esc(t.assignee_name || 'Не назначен')}</span></span>` : ''}<span class="tdate">${date(t.updated_at)}</span></button>`;
   };
-  const focusCard=t=>t?`<section class="focus-panel"><span class="focus-overline">${staff?'Актуальная заявка':'Ваше обращение'} · №${t.id}</span><h2>${esc(t.title)}</h2><p>${esc(t.next_step||statusNames[t.status])}</p><div class="focus-facts"><div><span>Статус</span><strong>${statusNames[t.status]}</strong></div><div><span>Ответственный</span><strong>${esc(t.assignee_name||'Назначается')}</strong></div></div><button class="focus-link" id="focus-ticket">Открыть заявку <span aria-hidden="true">↗</span></button></section>`:'';
-  shell('Заявки','<button class="button primary" id="new-ticket">+ Новая заявка</button>',`${portfolioOverview()}<div class="workspace-grid"><div class="panel"><div class="toolbar ticket-toolbar"><strong>${staff?(dispatcher?'Очередь заявок':'Мои заявки'):'Мои обращения'} <span class="ticket-count" id="ticket-count"></span></strong><div class="ticket-tools"><input class="field ticket-search" id="ticket-search" type="search" maxlength="100" aria-label="Поиск по заявкам" placeholder="Поиск по заявкам" value="${esc(state.search)}"><select id="filter" aria-label="Фильтр заявок"><option value="all">Все заявки</option>${staff?'<option value="mine">Мои заявки</option>':''}${dispatcher?'<option value="unassigned">Без ответственного</option>':''}${Object.entries(statusNames).map(([key,value])=>`<option value="${key}">${value}</option>`).join('')}</select></div></div><div id="ticket-list"></div></div><div class="context-stack"><div id="ticket-focus"></div>${recentActivity()}</div></div>`);
-  const updateList=()=>{
-    const query=state.search.trim().toLocaleLowerCase('ru-RU');
-    const matches=query?visible.filter(t=>[t.id,t.title,t.description,t.customer_name,t.customer_company,t.assignee_name,statusNames[t.status]].some(value=>String(value||'').toLocaleLowerCase('ru-RU').includes(query))):visible;
-    document.querySelector('#ticket-count').textContent=`${matches.length}`;
-    document.querySelector('#ticket-list').innerHTML=matches.map(ticketRow).join('')||(query?'<div class="empty"><strong>Ничего не найдено</strong>Попробуйте другой запрос или фильтр.</div>':'<div class="empty"><strong>Заявок пока нет</strong>Создайте новую заявку или выберите другой фильтр.</div>');
-    const focus=matches.find(t=>!['done','closed'].includes(t.status))||matches[0];
-    document.querySelector('#ticket-focus').innerHTML=focusCard(focus);
-    document.querySelector('#ticket-focus').hidden=!focus;
-    document.querySelector('#focus-ticket')?.addEventListener('click',()=>openTicket(focus.id));
-    document.querySelectorAll('#ticket-list [data-ticket]').forEach(el=>el.onclick=()=>openTicket(Number(el.dataset.ticket)));
+  const head = '<div class="table-head" aria-hidden="true"><span>№</span><span>Заявка</span><span>Статус</span><span>Ближайший срок</span><span>Оценка</span><span>Ответственный</span><span>Обновлена</span></div>'.replace('<span>Ответственный</span>', staff ? '<span>Ответственный</span>' : '');
+  shell(staff ? 'Заявки' : 'Мои заявки', '', `${staff ? '' : waitingPanel()}${portfolioOverview(owned)}<section class="panel ${staff ? '' : 'customer-ticket-list'}"><div class="toolbar"><div class="chips" role="group" aria-label="Фильтр по статусу">${chips}</div><div class="ticket-tools"><input class="field ticket-search" id="ticket-search" type="search" maxlength="100" aria-label="Поиск по заявкам" placeholder="Номер, тема, клиент" value="${esc(state.search)}">${ownerSelect}</div></div>${head}<div id="ticket-list"></div><div class="toolbar" style="border-top:1px solid var(--line-light);border-bottom:0;min-height:52px"><span class="muted" id="ticket-count"></span><span class="kbd-hint"><kbd>J</kbd><kbd>K</kbd> по строкам · <kbd>Enter</kbd> открыть</span></div></section>`, { kicker: staff ? (dispatcher ? 'Все клиенты' : 'Назначенные мне и команде') : 'Личный кабинет' });
+  const updateList = () => {
+    const query = state.search.trim().toLocaleLowerCase('ru-RU');
+    const matches = query ? visible.filter(t => [t.id, t.title, t.description, t.customer_name, t.customer_company, t.assignee_name, statusNames[t.status]].some(value => String(value || '').toLocaleLowerCase('ru-RU').includes(query))) : visible;
+    document.querySelector('#ticket-count').textContent = `Показано ${matches.length} из ${owned.length}`;
+    document.querySelector('#ticket-list').innerHTML = matches.map(ticketRow).join('') || (query ? '<div class="empty"><strong>Ничего не найдено</strong>Попробуйте другой запрос или фильтр.</div>' : '<div class="empty"><strong>Заявок пока нет</strong>Создайте новую заявку или выберите другой фильтр.</div>');
+    document.querySelectorAll('#ticket-list [data-ticket]').forEach(el => el.onclick = () => openTicket(Number(el.dataset.ticket)));
   };
-  document.querySelector('#filter').value=state.filter;
-  document.querySelector('#filter').onchange=e=>{state.filter=e.target.value;renderTickets();};
-  document.querySelector('#ticket-search').oninput=e=>{state.search=e.target.value;updateList();};
+  const ownerFilter = document.querySelector('#owner-filter');
+  if (ownerFilter) { ownerFilter.value = state.owner; ownerFilter.onchange = e => { state.owner = e.target.value; renderTickets(); }; }
+  document.querySelector('#ticket-search').oninput = e => { state.search = e.target.value; updateList(); };
   updateList();
-  document.querySelectorAll('[data-overview-filter]').forEach(button=>button.onclick=()=>{state.filter=button.dataset.overviewFilter;renderTickets();});
-  document.querySelector('#new-ticket')?.addEventListener('click',()=>setView('new'));
+  document.querySelectorAll('[data-waiting-ticket]').forEach(el => el.onclick = () => openTicket(Number(el.dataset.waitingTicket)));
+  bindWaitingBulk();
+  document.querySelectorAll('[data-status-filter],[data-overview-filter]').forEach(button => button.onclick = () => { const key = button.dataset.statusFilter || button.dataset.overviewFilter; state.filter = state.filter === key && button.dataset.overviewFilter ? 'all' : key; renderTickets(); });
 }
 function renderQueue() {
-  const needs=state.queue.filter(item=>item.priority<3).length;
-  const rows=state.queue.map(item=>`<button class="ticket-row queue-row" data-source="${item.source}" data-record="${item.id}"><span><strong>${item.source==='chat'?'Чат':'№'+item.id+' · '+esc(item.title)}</strong><small>${esc(item.customer_name)} · ${date(item.updated_at)}</small></span><span class="queue-action ${item.priority<3?'actionable':''}">${esc(item.next_action)}</span><span class="muted hide-mobile">${esc(item.assignee_name||'Без ответственного')}</span></button>`).join('');
-  const focus=state.queue[0];
-  const focusCard=focus?`<section class="focus-panel"><span class="focus-overline">СЛЕДУЮЩЕЕ ДЕЙСТВИЕ · ${focus.source==='chat'?'Общий чат':'ЗАЯВКА №'+focus.id}</span><h2>${esc(focus.source==='chat'?focus.customer_name:focus.title)}</h2><p>${esc(focus.next_action)}</p><div class="focus-facts"><div><span>Заказчик</span><strong>${esc(focus.customer_name)}</strong></div><div><span>Ответственный</span><strong>${esc(focus.assignee_name||'Не назначен')}</strong></div></div><button class="focus-link" id="focus-queue">Открыть ${focus.source==='chat'?'чат':'заявку'} <span aria-hidden="true">↗</span></button></section>`:'';
-  shell('Дашборд','<button class="button primary" id="new-ticket">+ Новая заявка</button>',`${queueOverview()}<div class="workspace-grid"><div class="panel"><div class="toolbar"><strong>Заявки и общие чаты</strong><span class="muted">${needs?`Требуют внимания: ${needs}`:'Сначала срочные действия'}</span></div>${rows||'<div class="empty"><strong>Очередь пуста</strong>Новых обращений пока нет.</div>'}</div><div class="context-stack">${focusCard}${workloadPanel()}${recentActivity()}</div></div>`);
-  document.querySelector('#new-ticket').onclick=()=>setView('new');
-  document.querySelector('#focus-queue')?.addEventListener('click',()=>focus.source==='chat'?openChat(focus.id):openTicket(focus.id));
-  document.querySelectorAll('.queue-row').forEach(el=>el.onclick=()=>el.dataset.source==='chat'?openChat(Number(el.dataset.record)):openTicket(Number(el.dataset.record)));
+  const dispatcher = isDispatcher();
+  const scoped = state.queue.filter(item => !dispatcher || state.queueScope !== 'mine' || item.assignee_id === state.user.id);
+  const items = scoped.map(item => { const sla = queueItemSla(item); return { ...item, sla, group: item.overdue || sla?.tone === 'late' ? 'late' : item.priority <= 1 ? 'urgent' : item.priority === 2 ? 'active' : 'waiting' }; });
+  const groupNames = [['late', 'Просрочено'], ['urgent', 'Срочно'], ['active', 'В работе'], ['waiting', 'Ждём заказчика']];
+  const count = key => items.filter(i => i.group === key).length;
+  const unassigned = items.filter(i => !i.assignee_id).length;
+  const late = count('late');
+  const stat = (key, label, value, hint, cls = '') => `<button type="button" class="stat ${cls} ${state.queueGroup === key ? 'active' : ''}" data-queue-group="${key}" aria-pressed="${state.queueGroup === key}"><span class="stat-label">${label}</span><strong>${value}</strong><small>${hint}</small></button>`;
+  const stats = `<div class="stats">${stat('late', 'Просрочено по SLA', late, late ? 'Ответить или оценить в первую очередь' : 'Все сроки соблюдены', late ? 'alert' : '')}${stat('urgent', 'Срочно', count('urgent'), 'Назначить или ответить')}${stat('unassigned', 'Без ответственного', unassigned, 'Нужно назначить исполнителя')}${stat('waiting', 'Ждём заказчика', count('waiting'), 'Решения по оценке и ответы')}</div>`;
+  const source = state.queueSource || 'all';
+  const byGroup = items.filter(i => !state.queueGroup || (state.queueGroup === 'unassigned' ? !i.assignee_id : i.group === state.queueGroup));
+  const visible = byGroup.filter(i => source === 'all' || i.source === source);
+  const ordered = groupNames.flatMap(([key]) => visible.filter(i => i.group === key));
+  const focus = ordered[0];
+  const row = item => {
+    const chat = item.source === 'chat';
+    const ticket = !chat && state.tickets.find(t => t.id === item.id);
+    const chatInfo = chat && state.chats.find(c => c.id === item.id);
+    const sub = chat ? (chatInfo?.last_message ? `«${chatInfo.last_message}»` : item.customer_name) : [item.customer_name, ticket?.customer_company].filter(Boolean).join(' · ');
+    return `<button class="qrow ${item === focus ? 'focused' : ''}" data-source="${item.source}" data-record="${item.id}"><span class="qico ${chat ? 'chat' : ''}">${icon(chat ? 'chat' : 'ticket')}</span><span class="qtext"><strong>${chat ? 'Чат · ' + esc(item.customer_name) : '№' + item.id + ' · ' + esc(item.title)}</strong><small>${esc(sub)} · ${date(item.updated_at)}</small></span><span class="qsla">${slaTag(item.sla)}</span><span class="qact ${item.priority < 3 ? 'actionable' : ''}">${esc(item.next_action)} →</span>${avatarOf(item.assignee_id, item.assignee_name)}</button>`;
+  };
+  const list = groupNames.map(([key, label]) => { const rows = visible.filter(i => i.group === key); return rows.length ? `<div class="queue-group ${key === 'late' ? 'late' : ''}">${label} · ${rows.length}</div>${rows.map(row).join('')}` : ''; }).join('');
+  const sourceChip = (key, label) => `<button type="button" class="chip ${source === key ? 'active' : ''}" data-queue-source="${key}" aria-pressed="${source === key}">${label} <i>${key === 'all' ? byGroup.length : byGroup.filter(i => i.source === key).length}</i></button>`;
+  const focusCard = focus ? `<section class="focus-panel"><span class="focus-overline">Следующее действие · ${focus.source === 'chat' ? 'общий чат' : 'заявка №' + focus.id}</span><h2>${esc(focus.source === 'chat' ? focus.customer_name : focus.title)}</h2><p>${esc(focus.next_action)}${focus.sla ? ` · ${esc(focus.sla.text)}` : ''}</p><div class="focus-facts"><div><span>Заказчик</span><strong>${esc(focus.customer_name)}</strong></div><div><span>Ответственный</span><strong>${esc(focus.assignee_name || 'Не назначен')}</strong></div></div><div class="focus-actions"><button class="button on-dark" id="focus-queue">Открыть ${focus.source === 'chat' ? 'чат' : 'заявку'}</button></div></section>` : '';
+  const scope = dispatcher ? `<div class="seg" role="group" aria-label="Чья очередь"><button type="button" data-scope="all" class="${state.queueScope !== 'mine' ? 'active' : ''}" aria-pressed="${state.queueScope !== 'mine'}">Вся команда</button><button type="button" data-scope="mine" class="${state.queueScope === 'mine' ? 'active' : ''}" aria-pressed="${state.queueScope === 'mine'}">Мои задачи</button></div>` : '';
+  const needs = items.filter(i => i.priority < 3).length;
+  const today = new Date().toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric', month: 'long' });
+  const lead = items.length ? `${needs} ${plural(needs, ['задача ждёт', 'задачи ждут', 'задач ждут'])} действия${late ? `, ${late} ${plural(late, ['просрочена', 'просрочены', 'просрочено'])} по SLA` : ''}` : 'Новых обращений пока нет';
+  const empty = state.queueGroup || source !== 'all' ? '<div class="empty"><strong>Здесь пусто</strong>Сбросьте фильтр, чтобы увидеть всю очередь.</div>' : '<div class="empty"><strong>Очередь пуста</strong>Новых обращений пока нет.</div>';
+  shell('Рабочая очередь', scope, `${stats}<div class="workspace-grid"><section class="panel"><div class="toolbar"><div class="toolbar-title"><strong>Очередь действий</strong><span class="kbd-hint"><kbd>J</kbd><kbd>K</kbd> по строкам · <kbd>Enter</kbd> открыть</span></div><div class="chips" role="group" aria-label="Тип обращений">${sourceChip('all', 'Все')}${sourceChip('ticket', 'Заявки')}${sourceChip('chat', 'Чаты')}</div></div>${list || empty}</section><div class="context-stack">${focusCard}${workloadPanel()}${recentActivity()}</div></div>`, { kicker: today.charAt(0).toUpperCase() + today.slice(1), lead });
+  document.querySelector('#focus-queue')?.addEventListener('click', () => focus.source === 'chat' ? openChat(focus.id) : openTicket(focus.id));
+  document.querySelectorAll('.qrow').forEach(el => el.onclick = () => el.dataset.source === 'chat' ? openChat(Number(el.dataset.record)) : openTicket(Number(el.dataset.record)));
+  document.querySelectorAll('[data-queue-group]').forEach(el => el.onclick = () => { state.queueGroup = state.queueGroup === el.dataset.queueGroup ? null : el.dataset.queueGroup; renderQueue(); });
+  document.querySelectorAll('[data-queue-source]').forEach(el => el.onclick = () => { state.queueSource = el.dataset.queueSource; renderQueue(); });
+  document.querySelectorAll('[data-scope]').forEach(el => el.onclick = () => { state.queueScope = el.dataset.scope; renderQueue(); });
 }
 function renderNotifications() {
-  const rows=state.notifications.map(n=>`<button class="ticket-row notification-row ${n.read_at?'':'unread'}" data-notice="${n.id}" data-target="${n.target}" data-record="${n.target==='chat'?n.chat_id:n.ticket_id}"><span><strong>${esc(n.text)}</strong><small>${n.target==='chat'?'Общий чат':'Заявка №'+n.ticket_id} · ${date(n.created_at)}</small></span><span class="muted">${n.read_at?'Прочитано':'Новое'}</span></button>`).join('');
-  shell('Уведомления','',`<div class="panel">${rows||'<div class="empty"><strong>Уведомлений пока нет</strong>Здесь появятся события по вашим заявкам.</div>'}</div>`);
+  const taskRows=state.user.role!=='customer'?(state.teamWorkspace?.events||[]).filter(e=>e.entity==='tasks').map(e=>`<button class="ticket-row notification-row ${e.read_at?'':'unread'}" data-task-notification="${e.entity_id}"><span><strong>${esc(e.title)}</strong><small>${({assignment:'Назначение',mention:'Упоминание',review:'Нужна проверка',change:'Существенное изменение'})[e.event_kind]||'Назначение'} · ${date(e.created_at)}</small></span><span class="badge ${e.read_at?'':'new'}">${e.read_at?'Прочитано':'Новое'}</span></button>`).join(''):'';
+  const rows=state.notifications.map(n=>`<button class="ticket-row notification-row ${n.read_at?'':'unread'}" data-notice="${n.id}" data-target="${n.target}" data-record="${n.target==='chat'?n.chat_id:n.ticket_id}"><span><strong>${esc(n.text)}</strong><small>${n.target==='chat'?'Общий чат':'Заявка №'+n.ticket_id} · ${date(n.created_at)}</small></span><span class="badge ${n.read_at?'':'new'}">${n.read_at?'Прочитано':'Новое'}</span></button>`).join('');
+  const pushAction=pushSupported()&&!state.pushEnabled&&Notification.permission!=='denied'?`<button class="button" id="enable-push">${icon('bell',16)}Уведомления на телефон</button>`:'';
+  shell('Уведомления',pushAction,`<div class="panel">${taskRows+rows||'<div class="empty"><strong>Уведомлений пока нет</strong>Здесь появятся события по вашим заявкам.</div>'}</div>`);
+  document.querySelectorAll('[data-task-notification]').forEach(b=>b.onclick=()=>TasksUI.open(Number(b.dataset.taskNotification)));
+  document.querySelector('#enable-push')?.addEventListener('click',async e=>{e.target.disabled=true;try{await enablePush();toast('Уведомления включены');renderNotifications();}catch(error){toast(error.message,'error');e.target.disabled=false;}});
   document.querySelectorAll('[data-notice]').forEach(el=>el.onclick=async()=>{try{await api(`/${el.dataset.target==='chat'?'chat-notifications':'notifications'}/${el.dataset.notice}/read`,{method:'POST'});await refresh();if(el.dataset.target==='chat')await openChat(Number(el.dataset.record));else await openTicket(Number(el.dataset.record));}catch(error){showError(error);}});
+}
+function mountAssigneeFilter(select,serviceType){
+  if(!select||document.querySelector('#assignee-specialty'))return;
+  const suggested={development:'programmer',new_development:'programmer',integration:'integrator',support:'devops',maintenance:'support'}[serviceType];
+  const control=document.createElement('label');control.textContent='Специализация исполнителя';
+  control.innerHTML+=`<select class="field" id="assignee-specialty"><option value="">Вся команда</option>${Object.entries(teamRoleNames).map(([key,label])=>`<option value="${key}">${label}</option>`).join('')}</select>`;
+  const label=select.closest("label");if(label)label.before(control);else select.before(control);
+  const filter=control.querySelector('select');
+  const paint=()=>{const current=select.value;const people=state.staff.filter(p=>!filter.value||p.team_role===filter.value).sort((a,b)=>state.tickets.filter(t=>t.assignee_id===a.id&&!['closed','done'].includes(t.status)).length-state.tickets.filter(t=>t.assignee_id===b.id&&!['closed','done'].includes(t.status)).length);select.innerHTML='<option value="">Назначить позже</option>'+people.map(p=>{const load=state.tickets.filter(t=>t.assignee_id===p.id&&!['closed','done'].includes(t.status)).length;return `<option value="${p.id}">${esc(staffLabel(p))} · ${load} в работе</option>`;}).join('');if(people.some(p=>String(p.id)===current))select.value=current;};
+  filter.onchange=paint;
+  if(!select.value&&suggested&&state.staff.some(p=>p.team_role===suggested))filter.value=suggested;
+  paint();
+  document.querySelector('#ticket-form [name="service_type"]')?.addEventListener('change',e=>{const role={development:'programmer',new_development:'programmer',integration:'integrator',support:'devops',maintenance:'support'}[e.target.value];filter.value=state.staff.some(p=>p.team_role===role)?role||'':'';paint();});
 }
 function renderNew() {
   const staff=state.user.role!=='customer';
   const dispatcher=state.user.role==='admin'||state.user.is_manager;
   const customerField=staff?`<label>Заказчик<select class="field" name="customer_id" required><option value="">Выберите заказчика</option>${state.customers.map(c=>`<option value="${c.id}">${esc(c.name)} · ${esc(c.email)}</option>`).join('')}</select></label>`:'';
-  const assigneeField=dispatcher?`<label>Ответственный<select class="field" name="assignee_id"><option value="">Назначить позже</option>${state.staff.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select></label>`:staff?'<p class="muted">Вы будете назначены ответственным за эту заявку.</p>':'';
-  const help=staff?['Выберите заказчика, которому нужна помощь.','Опишите задачу его словами — он увидит текст в своём кабинете.','После создания заказчик получит уведомление.']:['Коротко назовите задачу, чтобы её было легко найти.','Напишите, какой результат нужен и какие детали важны.','Команда оценит трудозатраты в часах; решение останется за вами.'];
-  shell('Новая заявка','',`<button class="back" id="back">← К заявкам</button><div class="form-layout"><div class="panel content"><h2>${staff?'Создать заявку для заказчика':'Опишите задачу'}</h2>${staff&&!state.customers.length?'<div class="notice">Нет доступных заказчиков. Менеджер или администратор может создать заявку для любого зарегистрированного заказчика.</div>':''}<form class="form" id="ticket-form">${customerField}<label>Тема<input class="field" name="title" required minlength="3" maxlength="140" placeholder="Коротко о задаче"></label><div id="kb-suggest-box" class="kb-suggest-box" style="display:none"></div><label>Описание<textarea name="description" required minlength="5" maxlength="10000" placeholder="Что нужно сделать? Укажите важные детали."></textarea></label>${assigneeField}<button class="button primary" ${staff&&!state.customers.length?'disabled':''}>Создать заявку</button></form></div><div class="form-help"><span>ПОДСКАЗКА</span><h2>Чтобы быстрее начать</h2>${help.map((item,index)=>`<div class="help-step"><b>${String(index+1).padStart(2,'0')}</b><p>${item}</p></div>`).join('')}</div></div>`);
-  document.querySelector('#ticket-form [name="title"]').parentElement.insertAdjacentHTML('beforebegin',`<label>Тип задачи<select class="field" name="service_type">${Object.entries(serviceNames).map(([key,label])=>`<option value="${key}">${label}</option>`).join('')}</select></label>`);
-  document.querySelector('#ticket-form [name="service_type"]').onchange=e=>{document.querySelector('#ticket-form [name="description"]').placeholder=serviceHints[e.target.value];document.querySelector('.form-help h2').textContent=serviceNames[e.target.value];};
+  const assigneeField=dispatcher?`<label>Ответственный<select class="field" name="assignee_id"><option value="">Назначить позже</option>${state.staff.map(s=>`<option value="${s.id}">${esc(staffLabel(s))}</option>`).join('')}</select></label>`:staff?'<p class="muted">Вы будете назначены ответственным за эту заявку.</p>':'';
+  const estimateField=staff?`<details class="estimate-inline"><summary>Сразу приложить оценку</summary><p class="muted">Заказчику останется только согласовать часы — или отказаться, если заявка не нужна.${dispatcher?' Для оценки нужен ответственный.':''}</p><label>Плановые трудозатраты, часов<input class="field" name="effort_hours" type="number" min="0.25" max="1666" step="0.25"></label><label>Потрачено на оценку, минут<input class="field" name="assessment_minutes" type="number" min="1" max="100000" step="1"></label><label>Пояснение к оценке<textarea name="estimate_note" maxlength="3000" placeholder="Что входит в работу"></textarea></label></details>`:'';
+  const help=staff?['Выберите заказчика, которому нужна помощь.','Опишите задачу его словами — он увидит текст в своём кабинете.','Приложите оценку — заказчик согласует её в один клик или откажется от заявки.']:['Коротко назовите задачу, чтобы её было легко найти.','Напишите, какой результат нужен и какие детали важны.','Команда оценит трудозатраты в часах; решение останется за вами.'];
+  shell('Новая заявка','',`<button class="back" id="back">← К заявкам</button><div class="form-layout"><div class="panel content"><h2>${staff?'Создать заявку для заказчика':'Опишите задачу'}</h2>${staff&&!state.customers.length?'<div class="notice">Нет доступных заказчиков. Менеджер или администратор может создать заявку для любого зарегистрированного заказчика.</div>':''}<form class="form" id="ticket-form">${staff?`<div class="template-bar"><label>Шаблон<select class="field" id="template-select"><option value="">Без шаблона</option></select></label><div class="row"><button type="button" class="button" id="template-save">Сохранить как шаблон</button><button type="button" class="button" id="template-delete" hidden>Удалить шаблон</button></div></div>`:''}${customerField}<label>Тема<input class="field" name="title" required minlength="3" maxlength="140" placeholder="Коротко о задаче"></label><div id="kb-suggest-box" class="kb-suggest-box" style="display:none"></div><label>Описание<textarea name="description" data-draft="new-ticket" required minlength="5" maxlength="10000" placeholder="Что нужно сделать? Укажите важные детали."></textarea></label>${assigneeField}${estimateField}<button class="button primary" ${staff&&!state.customers.length?'disabled':''}>Создать заявку</button></form></div><div class="form-help"><span>ПОДСКАЗКА</span><h2>Чтобы быстрее начать</h2>${help.map((item,index)=>`<div class="help-step"><b>${String(index+1).padStart(2,'0')}</b><p>${item}</p></div>`).join('')}</div></div>`);
+  document.querySelector('#ticket-form [name="title"]').parentElement.insertAdjacentHTML('beforebegin',`<label>Тип задачи<select class="field" name="service_type">${Object.entries(serviceNames).map(([key,label])=>`<option value="${key}">${label}</option>`).join('')}</select></label><label id="service-topic-field" hidden>Другая тема<input class="field" name="service_topic" maxlength="80" placeholder="Укажите свою тему" disabled></label>`);
+  if(dispatcher){
+    const details=document.createElement('details');details.className='estimate-inline';details.innerHTML='<summary>Добавить или подключить клиента</summary><div class="new-customer-invitation"></div>';
+    document.querySelector('#ticket-form').before(details);
+    const host=details.querySelector('.new-customer-invitation');
+    mountCustomerInvitation(host,null,access=>{
+      const select=document.querySelector('#ticket-form [name="customer_id"]');
+      select.innerHTML='<option value="">Выберите заказчика</option>'+state.customers.map(c=>`<option value="${c.id}">${esc(c.name)} · ${esc(c.email)}</option>`).join('');select.value=access.customer_id;
+      select.dispatchEvent(new Event('change'));
+      document.querySelector('#ticket-form button.primary').disabled=false;
+    });
+  }
+  document.querySelector('#ticket-form [name="service_type"]').onchange=e=>{
+    const other=e.target.value==='other';
+    const topic=document.querySelector('#ticket-form [name="service_topic"]');
+    document.querySelector('#service-topic-field').hidden=!other;
+    topic.disabled=!other;topic.required=other;
+    topic.setCustomValidity('');
+    document.querySelector('#ticket-form [name="description"]').placeholder=serviceHints[e.target.value];
+    document.querySelector('.form-help > h2').textContent=serviceNames[e.target.value];
+  };
+  document.querySelector('#ticket-form [name="service_topic"]').oninput=e=>e.target.setCustomValidity(e.target.value.trim()?'':'Укажите свою тему');
   document.querySelector('#ticket-form [name="service_type"]').dispatchEvent(new Event('change'));
   const titleInput = document.querySelector('#ticket-form [name="title"]');
   const suggestBox = document.querySelector('#kb-suggest-box');
@@ -341,7 +919,7 @@ function renderNew() {
         if (suggestBox) {
           suggestBox.innerHTML = `
             <div class="kb-suggest-header">
-              <span>💡 Возможно, ответ уже есть в базе знаний:</span>
+              <span>Возможно, ответ уже есть в базе знаний:</span>
             </div>
             <div class="kb-suggest-list">
               ${list.map(s => `
@@ -364,21 +942,139 @@ function renderNew() {
       }
     }, 250);
   });
-  document.querySelector('#ticket-form button').insertAdjacentHTML('beforebegin',`<label id="visibility-field" ${!staff&&!state.organizations.length?'hidden':''}>Кому видна заявка<select class="field" name="visibility"><option value="organization">Всей компании</option><option value="private">Только автору</option></select></label><label>Файлы к заявке<input class="field" name="files" type="file" multiple accept=".png,.jpg,.jpeg,.webp,.gif,.pdf,.txt,.doc,.docx,.xls,.xlsx,.csv,.zip"><small>До 10 МБ на файл. Можно приложить после создания.</small></label>`);
+  document.querySelector('#ticket-form > button.primary').insertAdjacentHTML('beforebegin',`<label id="visibility-field" ${!staff&&!state.organizations.length?'hidden':''}>Кому видна заявка<select class="field" name="visibility"><option value="organization">Всей компании</option><option value="private">Только автору</option></select></label><label>Файлы к заявке<input class="field" name="files" type="file" multiple accept=".png,.jpg,.jpeg,.webp,.gif,.pdf,.txt,.doc,.docx,.xls,.xlsx,.csv,.zip"><small>До 10 МБ на файл. Можно приложить после создания.</small></label>`);
   if(!staff&&state.organizations[0]?.members.some(m=>m.user_id===state.user.id&&m.role==='viewer')){document.querySelector('#visibility-field').hidden=true;document.querySelector('#visibility-field select').value='private';}
   if(staff)document.querySelector('#ticket-form [name="customer_id"]').onchange=e=>{const member=state.organizations.some(o=>o.members.some(m=>m.user_id===Number(e.target.value)));document.querySelector('#visibility-field').hidden=!member;document.querySelector('#visibility-field select').value=member?'organization':'private';};
   document.querySelector('#back').onclick=()=>setView('tickets');
-  document.querySelector('#ticket-form').onsubmit=async e=>{e.preventDefault();const files=[...e.target.elements.files.files];const data=Object.fromEntries(new FormData(e.target));delete data.files;if(document.querySelector('#visibility-field').hidden)data.visibility='private';if(staff){data.customer_id=Number(data.customer_id);if(dispatcher)data.assignee_id=data.assignee_id?Number(data.assignee_id):null;}e.target.querySelector('button').disabled=true;try{const ticket=await api('/tickets',{method:'POST',body:JSON.stringify(data)});const failed=[];for(const file of files){try{await upload(`/tickets/${ticket.id}/attachments`,file);}catch(error){failed.push(file.name);}}await refresh();await openTicket(ticket.id);if(failed.length){state.error=`Заявка создана, но файлы не загрузились: ${failed.join(', ')}. Прикрепите их в карточке.`;render();}}catch(error){showError(error);}};
+  if(staff)bindTicketTemplates(document.querySelector('#ticket-form'));
+  bindTicketDraft(document.querySelector('#ticket-form'));
+  mountAssigneeFilter(document.querySelector('#ticket-form [name="assignee_id"]'),document.querySelector('#ticket-form [name="service_type"]')?.value);
+  document.querySelector('#ticket-form').onsubmit=async e=>{e.preventDefault();const files=[...e.target.elements.files.files];const data=Object.fromEntries(new FormData(e.target));data.service_type=ticketServiceType(e.target);delete data.service_topic;delete data.files;if(document.querySelector('#visibility-field').hidden)data.visibility='private';if(staff){data.customer_id=Number(data.customer_id);if(dispatcher)data.assignee_id=data.assignee_id?Number(data.assignee_id):null;const effort=data.effort_hours;delete data.effort_hours;if(effort){if(dispatcher&&!data.assignee_id){showError(new Error('Чтобы сразу отправить оценку, выберите ответственного'));return;}data.effort_minutes=Math.round(Number(effort)*60);data.assessment_minutes=data.assessment_minutes?Number(data.assessment_minutes):null;}else{delete data.assessment_minutes;delete data.estimate_note;}}e.target.querySelector('button.primary').disabled=true;try{const ticket=await api('/tickets',{method:'POST',body:JSON.stringify(data)});clearDraft('new-ticket');clearDraft('ticket-form');const failed=[];for(const file of files){try{await upload(`/tickets/${ticket.id}/attachments`,file);}catch(error){failed.push(file.name);}}await refresh();await openTicket(ticket.id);if(failed.length){state.error=`Заявка создана, но файлы не загрузились: ${failed.join(', ')}. Прикрепите их в карточке.`;render();}}catch(error){showError(error);}};
 }
-async function openTicket(id) {try{state.current=await api(`/tickets/${id}`);state.current.assignee_profile=state.current.ticket.assignee_id?await api(`/staff/${state.current.ticket.assignee_id}/profile`).catch(()=>null):null;state.gitLinks=await api(`/tickets/${id}/git-links`).catch(()=>[]);state.view='detail';state.error='';render();}catch(error){showError(error);}}
+function bindTicketTemplates(form) {
+  const select = form.querySelector('#template-select');
+  const save = form.querySelector('#template-save');
+  const remove = form.querySelector('#template-delete');
+  const current = () => (state.templates || []).find(t => t.id === Number(select.value));
+  const fill = (selected = '') => {
+    select.innerHTML = `<option value="">Без шаблона</option>${(state.templates || []).map(t => `<option value="${t.id}">${esc(t.name)}${t.effort_minutes ? ` · ${hours(t.effort_minutes)}` : ''}</option>`).join('')}`;
+    select.value = selected;
+    remove.hidden = !select.value;
+  };
+  const load = async selected => { try { state.templates = await api('/ticket-templates'); fill(selected); } catch (error) { showError(error); } };
+  select.onchange = () => {
+    remove.hidden = !select.value; remove.textContent = 'Удалить шаблон';
+    const t = current();
+    if (!t) return;
+    form.elements.service_type.value = t.service_type.startsWith('custom:') ? 'other' : t.service_type;
+    form.elements.service_topic.value = t.service_type.startsWith('custom:') ? t.service_type.slice(7) : '';
+    form.elements.service_type.dispatchEvent(new Event('change'));
+    form.elements.title.value = t.title;
+    form.elements.description.value = t.description;
+    form.elements.effort_hours.value = t.effort_minutes ? t.effort_minutes / 60 : '';
+    form.elements.estimate_note.value = t.estimate_note || '';
+    form.querySelector('.estimate-inline').open = Boolean(t.effort_minutes);
+  };
+  save.onclick = async () => {
+    const title = form.elements.title.value.trim(), description = form.elements.description.value.trim();
+      if (form.elements.service_type.value === 'other' && !form.elements.service_topic.value.trim()) { showError(new Error('Укажите свою тему')); form.elements.service_topic.focus(); return; }
+    if (title.length < 3 || description.length < 5) { showError(new Error('Заполните тему и описание — из них получится шаблон')); return; }
+    const effort = form.elements.effort_hours.value;
+    save.disabled = true;
+    try {
+        const created = await api('/ticket-templates', { method: 'POST', body: JSON.stringify({ name: title.slice(0, 80), title, description, service_type: ticketServiceType(form), effort_minutes: effort ? Math.round(Number(effort) * 60) : null, estimate_note: form.elements.estimate_note.value }) });
+      await load(String(created.id));
+      toast('Шаблон сохранён — он появится в списке у всей команды');
+    } catch (error) { showError(error); } finally { save.disabled = false; }
+  };
+  remove.onclick = async () => {
+    if (remove.textContent !== 'Точно удалить?') { remove.textContent = 'Точно удалить?'; return; }
+    try { await api(`/ticket-templates/${select.value}`, { method: 'DELETE' }); remove.textContent = 'Удалить шаблон'; await load(''); toast('Шаблон удалён'); } catch (error) { showError(error); }
+  };
+  load('');
+}
+async function openTicket(id) {if(state.view!=='detail'||state.current?.ticket?.id!==id)delayedLoading(`Заявка №${id}`,'detail');try{const sameTicket=state.current?.ticket?.id===id;state.current=await api(`/tickets/${id}`);if(!sameTicket)state.detailTab='messages';state.current.assignee_profile=state.user.role!=='customer'&&state.current.ticket.assignee_id?await api(`/staff/${state.current.ticket.assignee_id}/profile`).catch(()=>null):null;state.gitLinks=await api(`/tickets/${id}/git-links`).catch(()=>[]);state.view='detail';state.error='';render();}catch(error){showError(error);}}
+/* ---------- Переписка: ответы, прочтение, итоги встреч ---------- */
+const viewerSide = () => state.user.role === 'customer' ? 'customer' : 'team';
+const messageSide = m => m.author_role === 'customer' ? 'customer' : 'team';
+const meetingKindNames = { call: 'созвона', meeting: 'встречи', chat: 'переписки', other: 'обсуждения' };
+function messageHtml(m, { header, extra = '', canReply = false }) {
+  const side = messageSide(m);
+  const quote = m.reply_to_id ? `<button type="button" class="reply-quote" data-jump="${m.reply_to_id}" aria-label="Перейти к исходному сообщению"><strong>${esc(m.reply_author_name || 'Сообщение')}</strong><span>${esc(m.reply_body || 'Сообщение удалено')}</span></button>` : '';
+  const reply = canReply ? `<button type="button" class="msg-reply" data-reply="${m.id}" aria-label="Ответить на сообщение ${esc(m.author_name)}">${icon('reply', 14)}<span>Ответить</span></button>` : '';
+  const status = side === viewerSide() ? '<span class="msg-status" aria-live="off"></span>' : '';
+  return `<div class="message ${m.author_id === state.user.id ? 'mine' : ''}" id="msg-${m.id}" data-msg="${m.id}" data-side="${side}"><div class="msg-head"><small>${header}</small>${reply}</div>${quote}<div class="msg-body">${esc(m.body)}</div>${extra}<div class="msg-foot">${status}</div></div>`;
+}
+function summaryCard(s) {
+  return `<article class="meeting-card" aria-label="Итоги ${meetingKindNames[s.kind] || 'встречи'}"><div class="meeting-head"><span class="meeting-ico">${icon('users', 16)}</span><div><strong>Итоги ${meetingKindNames[s.kind] || 'встречи'} · ${new Date(s.occurred_at).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })}</strong><small>${esc(s.author_name)}</small></div></div><span class="eyebrow">О чём договорились</span><p>${esc(s.client_summary)}</p>${s.client_next_steps ? `<span class="eyebrow">Что дальше</span><p>${esc(s.client_next_steps)}</p>` : ''}</article>`;
+}
+function timeline(messages, summaries, renderMessage) {
+  return [...messages.map(m => ({ at: m.created_at, kind: 'message', item: m })), ...(summaries || []).map(s => ({ at: s.shared_at, kind: 'summary', item: s }))]
+    .sort((a, b) => a.at.localeCompare(b.at))
+    .map(entry => entry.kind === 'summary' ? { at: entry.at, html: summaryCard(entry.item) } : { at: entry.at, html: renderMessage(entry.item) });
+}
+function paintReadTicks(readState) {
+  if (!readState) return;
+  const side = viewerSide();
+  const otherRead = side === 'customer' ? readState.team_read_id : readState.customer_read_id;
+  const who = side === 'customer' ? 'командой' : state.view === 'chat' && state.currentChat?.chat.organization_id ? 'участником компании' : 'заказчиком';
+  document.querySelectorAll(`.message[data-side="${side}"] .msg-status`).forEach(el => {
+    const read = Number(el.closest('.message').dataset.msg) <= (otherRead || 0);
+    el.className = `msg-status ${read ? 'read' : ''}`;
+    el.innerHTML = `${icon(read ? 'checks' : 'check', 14)}<span>${read ? `Прочитано ${who}` : 'Отправлено'}</span>`;
+  });
+}
+function replyBar(kind, record) {
+  const r = state.replyTo;
+  if (!r || r.kind !== kind || r.record !== record) return '<div class="reply-bar" id="reply-bar" hidden></div>';
+  return `<div class="reply-bar" id="reply-bar">${icon('reply', 15)}<div><strong>Ответ ${esc(r.author)}</strong><span>${esc(r.body.slice(0, 160))}</span></div><button type="button" class="icon-btn" id="cancel-reply" aria-label="Отменить ответ">×</button></div>`;
+}
+function bindConversation(kind, record, messages, readState) {
+  paintReadTicks(readState);
+  document.querySelectorAll('[data-jump]').forEach(el => el.onclick = () => {
+    const target = document.querySelector(`#msg-${el.dataset.jump}`);
+    if (!target) return toast('Исходное сообщение не найдено', 'error');
+    target.scrollIntoView({ block: 'center', behavior: reduceMotion() ? 'auto' : 'smooth' });
+    target.classList.remove('flash'); void target.offsetWidth; target.classList.add('flash');
+  });
+  document.querySelectorAll('[data-reply]').forEach(el => el.onclick = () => {
+    const m = messages.find(x => x.id === Number(el.dataset.reply));
+    if (!m) return;
+    state.replyTo = { kind, record, id: m.id, author: m.author_name, body: m.body };
+    const bar = document.querySelector('#reply-bar');
+    if (bar) { bar.outerHTML = replyBar(kind, record); bindReplyCancel(kind, record); }
+    document.querySelector(kind === 'ticket' ? '#message-body' : '#chat-body')?.focus();
+  });
+  bindReplyCancel(kind, record);
+  markRead(kind, record, messages);
+}
+function bindReplyCancel(kind, record) {
+  document.querySelector('#cancel-reply')?.addEventListener('click', () => { state.replyTo = null; document.querySelector('#reply-bar').outerHTML = replyBar(kind, record); });
+}
+const replyToId = (kind, record) => state.replyTo?.kind === kind && state.replyTo.record === record ? state.replyTo.id : null;
+state.readSent = {};
+async function markRead(kind, record, messages) {
+  const top = messages.reduce((max, m) => Math.max(max, m.id), 0);
+  const key = `${kind}-${record}`;
+  if (document.visibilityState !== 'visible' || (state.readSent[key] || 0) >= top && state.readSent[key] !== undefined) return;
+  state.readSent[key] = top;
+  try {
+    const reads = await api(`/${kind === 'ticket' ? 'tickets' : 'chats'}/${record}/read`, { method: 'POST', body: JSON.stringify({}) });
+    const current = kind === 'ticket' ? state.current : state.currentChat;
+    if (current) current.read_state = reads;
+    loadNotifications().catch(() => {});
+  } catch {}
+}
 function ticketProgress(ticket, estimates) {
-  const estimate=estimates[0];
-  const step=['done','closed'].includes(ticket.status)?4:['working','waiting'].includes(ticket.status)?3:estimate?.state==='approved'?2:estimate?1:0;
-  const steps=['Создана','Оценка','Согласовано','В работе','Готово'];
-  return `<section class="ticket-progress" aria-label="Этапы заявки"><div class="ticket-progress-top"><span class="overview-kicker">Ход заявки</span><strong class="ticket-progress-status">${steps[step]}</strong></div><ol>${steps.map((label,index)=>`<li class="${index<step?'passed':index===step?'current':''}" ${index===step?'aria-current="step"':''}><span class="step-dot">${index<step?'✓':index+1}</span><span class="step-label">${label}</span></li>`).join('')}</ol></section>`;
+  if (ticket.declined) return `<div class="notice">Заказчик отказался от заявки — работа не выполнялась.</div>`;
+  const estimate = estimates[0];
+  const step = ticket.status === 'closed' ? 4 : ticket.status === 'done' ? 4 : ['working', 'waiting'].includes(ticket.status) ? 3 : ['approved','pending'].includes(estimate?.state) ? 2 : estimate ? 1 : 0;
+  const steps = ['Создана', 'Оценка', 'Согласование', 'В работе', 'Приёмка'];
+  return `<section class="ticket-progress" aria-label="Этапы заявки"><p class="current-stage">Этап ${step+1} из ${steps.length}: <strong>${ticket.status==='closed'?'Работа завершена':steps[step]}</strong></p><ol>${steps.map((label, index) => `<li class="${index < step ? 'passed' : index === step ? 'current' : ''}" ${index === step ? 'aria-current="step"' : ''}><span class="step-dot">${index < step ? '✓' : index + 1}</span><span class="step-label">${label}</span></li>`).join('')}</ol></section>`;
 }
 function renderCsat(t, staff) {
-  if (!['done', 'closed'].includes(t.status)) return '';
+  if (!['done', 'closed'].includes(t.status) || t.declined) return '';
+  if (!staff && !t.rating && t.status !== 'closed') return '';
   if (!staff) {
     if (t.rating) {
       return `<div class="csat-box"><div class="csat-title">Ваша оценка работы</div><div class="csat-stars">${[1,2,3,4,5].map(s=>`<span class="csat-star active">${s<=t.rating?'★':'☆'}</span>`).join('')}</div>${t.rating_comment?`<p style="margin:6px 0;font-size:13px">«${esc(t.rating_comment)}»</p>`:''}<div class="csat-result">✓ Спасибо за вашу оценку!</div></div>`;
@@ -443,13 +1139,13 @@ function renderInternalNotes(ticketId) {
     <section class="internal-notes-panel">
       <div class="internal-notes-header">
         <div class="internal-notes-title">
-          <span>🔒 Заметки команды</span>
+          <span>Заметки команды</span>
           <span class="internal-notes-badge">${notes.length}</span>
         </div>
         <small class="muted">Видны только сотрудникам</small>
       </div>
       <div class="internal-notes-notice">
-        <span>🛡️ Закрытый служебный блок: заказчик не видит эту переписку.</span>
+        <span>Закрытый служебный блок: заказчик не видит эту переписку.</span>
       </div>
       <div class="internal-notes-list">
         ${notes.map(n => `
@@ -463,11 +1159,12 @@ function renderInternalNotes(ticketId) {
         `).join('') || '<div class="muted" style="font-size:12.5px;padding:4px 0">Заметок пока нет. Зафиксируйте технические детали, пароли или ход задачи.</div>'}
       </div>
       <form class="internal-note-form" id="internal-note-form">
-        <textarea name="body" required placeholder="Добавить внутреннюю заметку..." maxlength="5000"></textarea>
+        <textarea id="internal-note-body" data-draft="note-${ticketId}" name="body" required placeholder="Добавить внутреннюю заметку..." maxlength="5000"></textarea>
         <button class="button">Записать</button>
       </form>
     </section>
   `;
+  bindDrafts(container);
   container.querySelector('#internal-note-form')?.addEventListener('submit', async (e) => {
     e.preventDefault();
     const body = new FormData(e.target).get('body');
@@ -478,6 +1175,7 @@ function renderInternalNotes(ticketId) {
         method: 'POST',
         body: JSON.stringify({ body })
       });
+      clearDraft(`note-${ticketId}`);
       await loadInternalNotes(ticketId);
     } catch(err) {
       showError(err);
@@ -496,12 +1194,12 @@ async function renderCannedTrigger() {
   const buttonWrap = document.createElement('div');
   buttonWrap.className = 'canned-wrap';
   buttonWrap.innerHTML = `
-    <button type="button" class="button canned-btn" id="canned-toggle">Быстрые ответы ⚡</button>
+    <button type="button" class="button small canned-btn" id="canned-toggle">Быстрые ответы</button>
     <div class="canned-menu" id="canned-menu" hidden>
       ${renderCannedMenuItems()}
     </div>
   `;
-  composer.querySelector('button')?.insertAdjacentElement('beforebegin', buttonWrap);
+  (composer.querySelector('.composer-bar')||composer).prepend(buttonWrap);
   const toggle = buttonWrap.querySelector('#canned-toggle');
   const menu = buttonWrap.querySelector('#canned-menu');
   toggle.onclick = (e) => {
@@ -540,144 +1238,332 @@ function renderCannedMenuItems() {
 }
 
 function renderDetail() {
-  const {ticket:t,messages,events,estimates=[]}=state.current;
-  const staff=state.user.role!=='customer';
-  const viewer=!staff&&t.visibility==='organization'&&state.organizations.some(o=>o.id===t.organization_id&&o.members.some(m=>m.user_id===state.user.id&&m.role==='viewer'));
-  const canStatus=staff&&(state.user.role==='admin'||t.assignee_id===state.user.id);
-  const assignee=state.user.role==='admin'||state.user.is_manager?`<select id="assignee"><option value="">Без ответственного</option>${state.staff.map(x=>`<option value="${x.id}">${esc(x.name)}</option>`).join('')}</select>`:`<strong>${esc(t.assignee_name||'Не назначен')}</strong>`;
-  const status=canStatus?`<select id="status">${Object.entries(statusNames).map(([key,label])=>`<option value="${key}">${label}</option>`).join('')}</select>`:`<strong><span class="badge ${esc(t.status)}">${statusNames[t.status]}</span></strong>`;
-  const chat=messages.map(m=>`<div class="message ${m.author_id===state.user.id?'mine':''}"><small>${esc(m.author_name)} · ${date(m.created_at)}</small>${esc(m.body)}</div>`).join('')||'<div class="empty">Сообщений пока нет. Напишите первое сообщение.</div>';
-  const history=events.map(e=>`<li>${date(e.created_at)} · ${esc(e.actor_name)}: ${e.kind==='status'?'статус изменён на '+(statusNames[e.new_value]||e.new_value):'ответственный изменён'}</li>`).join('');
-  const person=state.current.assignee_profile;
-  shell(`Заявка №${t.id}`,'',`<button class="back" id="back">← К заявкам</button><div class="detail-grid"><div><section class="panel content" style="margin-bottom:18px"><h2>${esc(t.title)}</h2><p class="description">${esc(t.description)}</p></section><section class="panel"><div class="toolbar"><strong>Переписка</strong><span class="muted">${messages.length} сообщений</span></div><div class="messages">${chat}</div>${t.status!=='closed'?'<form class="composer" id="message-form"><textarea name="body" required maxlength="10000" aria-label="Сообщение" placeholder="Напишите сообщение..."></textarea><button class="button primary">Отправить</button></form>':'<div class="content muted">Заявка закрыта. Переписка доступна для чтения.</div>'}</section>${staff?'<div id="internal-notes-container"></div>':''}${renderCsat(t, staff)}</div><div><section class="panel content"><h2>Информация</h2><div class="meta"><div><label>Заказчик</label><strong>${esc(t.customer_name)}</strong></div><div><label>Ответственный</label>${assignee}</div><div><label>Статус</label>${status}</div><div><label>Создана</label><strong>${date(t.created_at)}</strong></div></div></section>${history?`<section class="panel content" style="margin-top:18px"><h2>История</h2><ol class="events">${history}</ol></section>`:''}</div></div>`);
-  if(viewer){document.querySelector('#message-form')?.remove();document.querySelector('.detail-grid>div:first-child>.panel:not(.content)').insertAdjacentHTML('beforeend','<div class="content muted">У вас доступ к просмотру заявки.</div>');}
-  document.querySelector('.detail-grid>div:first-child').insertAdjacentHTML('afterbegin',ticketProgress(t,estimates));
-  const sla=ticketSlaBadges(t);
-  if(sla) document.querySelector('.detail-grid .meta').insertAdjacentHTML('afterbegin',`<div><label>SLA сроки</label><div>${sla}</div></div>`);
-  if(staff&&t.customer_company)document.querySelector('.detail-grid .meta>div:first-child').insertAdjacentHTML('beforeend',`<small class="customer-company">${esc(t.customer_company)}</small>`);
-  if(person)document.querySelector('.detail-grid>div:last-child').insertAdjacentHTML('beforeend',`<section class="panel content assigned-person"><div class="person-heading">${avatar(person)}<div><span class="eyebrow">Ваш специалист</span><h2>${esc(person.name)}</h2><p>${esc(person.job_title||'Сотрудник команды')}</p></div></div>${person.bio?`<p class="person-bio">${esc(person.bio)}</p>`:''}</section>`);
-  if(t.created_by_name) document.querySelector('.detail-grid .meta').insertAdjacentHTML('beforeend',`<div><label>Создал</label><strong>${esc(t.created_by_name)}</strong></div>`);
-  document.querySelector('.detail-grid .meta').insertAdjacentHTML('afterbegin',`<div><label>Тип задачи</label><strong>${serviceNames[t.service_type]||'Другое'}</strong></div>${t.organization_id?`<div><label>Видимость</label><strong>${t.visibility==='organization'?'Вся компания':'Личная заявка'}</strong></div>`:''}`);
-  if(t.next_step) document.querySelector('.detail-grid>div:first-child').insertAdjacentHTML('afterbegin',`<div class="next-step"><span>Следующий шаг</span><strong>${esc(t.next_step)}</strong></div>`);
-  if(state.current.linked_chat){document.querySelector('.detail-grid>div:first-child>.panel.content').insertAdjacentHTML('beforeend',`<button class="button linked-chat" id="linked-chat">Обсуждение в общем чате</button>`);document.querySelector('#linked-chat').onclick=()=>openChat(state.current.linked_chat.chat_id);}
+  const { ticket: t, messages, events, estimates = [] } = state.current;
+  const staff = state.user.role !== 'customer';
+  const dispatcher = isDispatcher();
+  const viewer = (staff && t.can_write === false) || !staff && t.visibility === 'organization' && state.organizations.some(o => o.id === t.organization_id && o.members.some(m => m.user_id === state.user.id && m.role === 'viewer'));
+  const canStatus = staff && t.status !== 'closed' && (state.user.role === 'admin' || t.assignee_id === state.user.id);
+  const late = ticketSla(t).filter(s => s.tone === 'late');
+  const badges = `<span class="badge ${esc(t.status)}">${statusNames[t.status]}</span>${late.map(s => `<span class="sla late">${icon('clock', 13)}${s.label} ${s.label === 'Ответ' ? 'просрочен' : 'просрочена'} на ${formatDuration(-s.diff)}</span>`).join('')}<span class="badge">${esc(serviceLabel(t.service_type))}</span>`;
+  const lead = [`№${t.id}`, staff ? (t.customer_company || t.customer_name) : '', `создана ${date(t.created_at)}`, t.organization_id ? (t.visibility === 'organization' ? 'видна всей компании' : 'личная заявка') : ''].filter(Boolean).map(esc).join(' · ');
+  const statusOptions = Object.entries(statusNames).filter(([key]) => key !== 'closed' || dispatcher || t.status === 'closed');
+  const statusControl = canStatus ? `<label class="select-inline"><span>Статус</span><select id="status">${statusOptions.map(([key, label]) => `<option value="${key}">${key === 'done' && t.status !== 'done' ? 'Отправить на проверку' : key === 'closed' && t.status !== 'closed' ? 'Закрыть без приёмки' : label}</option>`).join('')}</select></label>` : '';
+  const assignee = dispatcher ? `<select id="assignee" aria-label="Ответственный"><option value="">Без ответственного</option>${state.staff.map(x => `<option value="${x.id}">${esc(staffLabel(x))}</option>`).join('')}</select>` : `<span class="meta-person">${t.assignee_id ? avatarOf(t.assignee_id, t.assignee_name) : ''}${esc(t.assignee_name || 'Не назначен')}</span>`;
+  const canReply = !viewer && t.status !== 'closed';
+  const chat = timeline(messages, state.current.meeting_summaries, m => messageHtml(m, { header: `${esc(m.author_name)} · ${date(m.created_at)}`, canReply })).map(x => x.html).join('') || `<div class="empty">${canReply ? 'Сообщений пока нет. Напишите первое сообщение.' : 'Сообщений пока нет. Здесь появится история переписки.'}</div>`;
+  const eventText = e => e.kind==='service_budget'?'лимит сопровождения изменён: '+(e.new_value==='unlimited'?'без ограничения':hours(Number(e.new_value))):e.kind==='owner_help'?'отправлен запрос менеджеру на восстановление владельца':e.kind === 'reopen' ? 'заявка возвращена в работу: ' + esc(e.new_value) : e.kind === 'status' ? 'статус изменён на «' + esc(statusNames[e.new_value] || e.new_value) + '»' : e.kind === 'acceptance' ? (e.new_value === 'accepted' ? 'работа принята' : 'работа возвращена на доработку') : e.kind === 'decline' ? 'заказчик отказался от заявки' : 'ответственный изменён';
+  const history = events.map(e => `<li><div>${esc(e.actor_name)}: ${eventText(e)}<small>${date(e.created_at)}</small></div></li>`).join('');
+  const person = state.current.assignee_profile;
+  if (!staff && state.detailTab === 'notes') state.detailTab = 'messages';
+  const tab = state.detailTab || 'messages';
+  const tabButton = (id, label, count, ic = '') => `<button type="button" role="tab" class="tab ${tab === id ? 'active' : ''}" aria-selected="${tab === id}" data-detail-tab="${id}">${ic}${label}${count !== undefined ? ` <i>${count}</i>` : ''}</button>`;
+  const composer = viewer ? '<div class="content muted">У вас доступ только к просмотру заявки.</div>' : t.status !== 'closed' ? `<form class="composer" id="message-form">${replyBar('ticket', t.id)}<label class="visually-hidden" for="message-body">Сообщение</label><textarea id="message-body" data-draft="ticket-${t.id}" name="body" required maxlength="10000" placeholder="${staff ? 'Напишите сообщение заказчику…' : 'Напишите сообщение команде…'}"></textarea><div class="composer-bar"><span class="composer-hint">Ctrl + Enter — отправить</span><button class="button primary">Отправить</button></div></form>` : '<div class="content muted">Заявка закрыта. Переписка доступна для чтения.</div>';
+  const meta = `<dl class="meta"><dt>Заказчик</dt><dd>${esc(t.customer_name)}${staff && t.customer_company ? `<small>${esc(t.customer_company)}</small>` : ''}</dd>${staff ? `<dt>Ответственный</dt><dd>${assignee}</dd>` : ''}<dt>Тип задачи</dt><dd>${esc(serviceLabel(t.service_type))}</dd>${t.organization_id ? `<dt>Видимость</dt><dd>${t.visibility === 'organization' ? 'Вся компания' : 'Личная заявка'}</dd>` : ''}<dt>Создана</dt><dd>${date(t.created_at)}</dd>${t.created_by_name ? `<dt>Создал</dt><dd>${esc(t.created_by_name)}</dd>` : ''}</dl>`;
+  const personCard = staff && person ? `<section class="panel content assigned-person"><div class="person-heading">${avatar(person)}<div><span class="eyebrow">${staff ? 'Ответственный' : 'Ваш специалист'}</span><h2>${esc(person.name)}</h2><p>${esc([(person.function_names||[teamRoleNames[person.team_role]]).filter(Boolean).join(", "),person.job_title].filter(Boolean).join(' · ') || 'Сотрудник команды')}</p></div></div>${person.bio ? `<p class="person-bio">${esc(person.bio)}</p>` : ''}</section>` : '';
+  const body = `${ticketProgress(t, estimates)}<div class="detail-grid"><div>${t.next_step ? `<div class="next-step"><span>Следующий шаг</span><strong>${esc(t.next_step)}</strong></div>` : ''}<section class="panel content"><h2>Описание задачи</h2><p class="description">${esc(t.description)}</p>${state.current.linked_chat ? `<button class="button linked-chat" id="linked-chat">${icon('chat', 16)}Обсуждение в общем чате</button>` : ''}</section><section class="panel conversation"><div class="tabs" role="tablist" aria-label="Обсуждение заявки">${tabButton('messages', 'Переписка', messages.length)}${staff ? tabButton('notes', 'Заметки команды', undefined, icon('lock', 14)) : ''}${tabButton('history', 'История', events.length)}</div><div class="tab-pane" data-pane="messages" ${tab !== 'messages' ? 'hidden' : ''}><div class="messages">${chat}</div>${composer}</div>${staff ? `<div class="tab-pane" data-pane="notes" ${tab !== 'notes' ? 'hidden' : ''}><div id="internal-notes-container"></div></div>` : ''}<div class="tab-pane" data-pane="history" ${tab !== 'history' ? 'hidden' : ''}>${history ? `<ol class="events">${history}</ol>` : '<div class="empty">В истории пока нет событий.</div>'}</div></section>${renderCsat(t, staff)}</div><div><section class="panel content"><h2>Детали</h2>${meta}</section>${personCard}</div></div>`;
+  shell(t.title, statusControl, body, { crumbs: `<button class="crumb-link" id="back">Заявки</button><span aria-hidden="true">/</span><span>№${t.id}</span>`, badges, lead });
   renderEstimate(t, estimates, staff);
+  renderAcceptance(t, staff);
   renderOperations();
-  document.querySelector('#back').onclick=()=>setView('tickets');
-  if(state.user.role==='admin'||state.user.is_manager) document.querySelector('#assignee').value=t.assignee_id||'';
-  if(canStatus) document.querySelector('#status').value=t.status;
-  document.querySelector('#assignee')?.addEventListener('change',async e=>{try{await api(`/tickets/${t.id}/assignee`,{method:'PATCH',body:JSON.stringify({assignee_id:e.target.value?Number(e.target.value):null})});await refresh();await openTicket(t.id);}catch(error){showError(error);}});
-  document.querySelector('#status')?.addEventListener('change',async e=>{try{await api(`/tickets/${t.id}/status`,{method:'PATCH',body:JSON.stringify({status:e.target.value})});await refresh();await openTicket(t.id);}catch(error){showError(error);}});
-  document.querySelector('#message-form')?.addEventListener('submit',async e=>{e.preventDefault();const body=new FormData(e.target).get('body');e.target.querySelector('button').disabled=true;try{await api(`/tickets/${t.id}/messages`,{method:'POST',body:JSON.stringify({body,request_id:crypto.randomUUID()})});await refresh();await openTicket(t.id);}catch(error){showError(error);}});
-  if(staff) {
-    loadInternalNotes(t.id);
-    if(t.status!=='closed') renderCannedTrigger();
+  foldTicketContext();
+  if(t.visibility==='organization'&&t.has_available_owner===false){
+    document.querySelector('.detail-grid>div:first-child').insertAdjacentHTML('afterbegin',`<section class="notice" role="status"><p>У компании нет владельца с действующим доступом. Согласование общих работ недоступно.</p>${dispatcher?'<button class="button" id="resolve-owner">Назначить владельца или восстановить доступ</button>':'<p>Менеджер поможет назначить владельца или восстановить его доступ.</p><button class="button" id="request-owner-help">Попросить менеджера восстановить согласование</button>'}</section>`);
+    document.querySelector('#request-owner-help')?.addEventListener('click',async e=>{e.target.disabled=true;try{const result=await api(`/tickets/${t.id}/owner-help`,{method:'POST'});toast(result.message);e.target.textContent='Запрос передан менеджеру';}catch(error){showError(error);}});
+    document.querySelector('#resolve-owner')?.addEventListener('click',()=>{setView('organizations');document.querySelector(`[data-org-card="${t.organization_id}"]`)?.scrollIntoView({block:'start'});});
   }
+  if (dispatcher && t.status === 'closed') {
+    document.querySelector('.detail-grid>div:last-child').insertAdjacentHTML('beforeend', `<section class="panel content"><h2>Вернуть заявку в работу</h2><p class="muted">Предыдущая приёмка останется в истории. Результат понадобится принять повторно.</p><form class="form" id="reopen-form"><label>Причина<textarea name="reason" required minlength="3" maxlength="2000"></textarea></label><button class="button">Вернуть в работу</button></form></section>`);
+    document.querySelector('#reopen-form').onsubmit = async e => { e.preventDefault(); const button=e.target.querySelector('button');button.disabled=true;try{await api(`/tickets/${t.id}/reopen`,{method:'POST',body:JSON.stringify({reason:e.target.elements.reason.value})});toast('Заявка возвращена в работу');await refresh();await openTicket(t.id);}catch(error){toast(error.message,'error');button.disabled=false;} };
+  }
+  if(staff&&t.can_write!==false&&state.teamWorkspace?.my_permissions.includes('tasks')){document.querySelector('.detail-grid>div:last-child').insertAdjacentHTML('beforeend',`<section class="panel content"><h2>Работа по заявке</h2><button class="button" id="ticket-create-task">Создать связанную задачу</button></section>`);document.querySelector('#ticket-create-task').onclick=()=>TasksUI.quickCreate({title:t.title,description:t.description.slice(0,5000),customer_id:t.customer_id,customer_name:t.customer_name,ticket_id:t.id,owner_id:state.user.id});}
+  document.querySelector('#linked-chat')?.addEventListener('click', () => openChat(state.current.linked_chat.chat_id));
+  document.querySelector('#back').onclick = () => setView('tickets');
+  if (dispatcher) {document.querySelector('#assignee').value = t.assignee_id || '';mountAssigneeFilter(document.querySelector('#assignee'),t.service_type);}
+  if (canStatus) document.querySelector('#status').value = t.status;
+  document.querySelectorAll('[data-detail-tab]').forEach(button => button.onclick = () => { state.detailTab = button.dataset.detailTab; document.querySelectorAll('[data-detail-tab]').forEach(x => { const on = x === button; x.classList.toggle('active', on); x.setAttribute('aria-selected', String(on)); }); document.querySelectorAll('.tab-pane').forEach(pane => pane.hidden = pane.dataset.pane !== state.detailTab); });
+  const box = document.querySelector('.tab-pane[data-pane="messages"] .messages');
+  if (box) box.scrollTop = box.scrollHeight;
+  popLastMessage(box);
+  document.querySelector('#assignee')?.addEventListener('change', async e => { try { await api(`/tickets/${t.id}/assignee`, { method: 'PATCH', body: JSON.stringify({ assignee_id: e.target.value ? Number(e.target.value) : null }) }); toast('Ответственный обновлён'); await refresh(); await openTicket(t.id); } catch (error) { showError(error); } });
+  document.querySelector('#status')?.addEventListener('change', async e => { try { await api(`/tickets/${t.id}/status`, { method: 'PATCH', body: JSON.stringify({ status: e.target.value }) }); toast(`Статус изменён: ${statusNames[e.target.value]}`); await refresh(); await openTicket(t.id); } catch (error) { showError(error); } });
+  bindCtrlEnter('#message-form');
+  document.querySelector('#message-form')?.addEventListener('submit', async e => { e.preventDefault(); const body = new FormData(e.target).get('body'); e.target.querySelector('button.primary').disabled = true; try { await api(`/tickets/${t.id}/messages`, { method: 'POST', body: JSON.stringify({ body, request_id: crypto.randomUUID(), reply_to_id: replyToId('ticket', t.id) }) }); clearDraft(`ticket-${t.id}`); state.replyTo = null; state.justSent = true; await refresh(); await openTicket(t.id); } catch (error) { showError(error); } });
+  if (staff) {
+    loadInternalNotes(t.id);
+    if (t.status !== 'closed') renderCannedTrigger();
+  }
+  if (!viewer && t.status !== 'closed') bindDropzone(document.querySelector('.conversation'), 'Отпустите, чтобы прикрепить к заявке', async files => {
+    toast(`Загружаем файлы: ${files.length}`, 'info');
+    const failed = [];
+    for (const file of files) { try { await upload(`/tickets/${t.id}/attachments`, file); } catch (error) { failed.push(file.name); } }
+    if (failed.length) toast(`Не удалось загрузить: ${failed.join(', ')}`, 'error'); else toast(files.length === 1 ? 'Файл прикреплён к заявке' : `Файлы прикреплены к заявке: ${files.length}`);
+    await refresh(); await openTicket(t.id);
+  });
   attachCsatHandlers(t);
+  bindConversation('ticket', t.id, messages, state.current.read_state);
+}
+function foldTicketContext(){
+  document.querySelectorAll('.detail-grid section.panel').forEach(panel=>{
+    const title=panel.querySelector('h2');if(!title||!['Сроки SLA','Файлы','Детали','Фактические трудозатраты'].includes(title.textContent))return;
+    const details=document.createElement('details');details.className='ticket-context';
+    const summary=document.createElement('summary');summary.textContent=title.textContent;
+    const body=document.createElement('div');body.className='ticket-context-body';title.remove();
+    while(panel.firstChild)body.append(panel.firstChild);
+    details.append(summary,body);panel.append(details);
+    if(title.textContent==='Фактические трудозатраты'&&state.user.role!=='customer'&&state.current.ticket.assignee_id===state.user.id)details.open=true;
+  });
+}
+function renderAcceptance(t, staff) {
+  if (staff || t.status !== 'done') return;
+  const host = document.querySelector('.detail-grid>div:first-child');
+  if (!t.can_decide) {
+    host.insertAdjacentHTML('afterbegin', `<section class="panel content acceptance-panel"><h2>Работа на проверке</h2><p class="muted">Принять общую работу или вернуть её на доработку может владелец компании.</p></section>`);
+    return;
+  }
+  host.querySelector('.next-step')?.remove();
+  host.insertAdjacentHTML('afterbegin', `<section class="panel content acceptance-panel needs-action"><div class="eyebrow">Ваше действие</div><h2>Работа готова — проверьте результат</h2><p>Если всё в порядке, примите работу, и заявка закроется. Если что-то нужно поправить, верните её с комментарием: команда продолжит работу.</p><div class="row acceptance-actions"><button class="button primary" id="accept-work">${icon('check', 16)}Принять работу</button><button class="button" id="return-work">Вернуть на доработку</button></div><form class="form" id="return-form" hidden><label>Что нужно доработать<textarea name="comment" data-draft="return-${t.id}" required minlength="3" maxlength="3000" placeholder="Например: заказы с сайта не попадают в CRM"></textarea></label><div class="row"><button class="button primary">Вернуть на доработку</button><button type="button" class="button" id="cancel-return">Отмена</button></div></form></section>`);
+  bindDrafts(host);
+  const send = async (data, message) => {
+    try { await api(`/tickets/${t.id}/acceptance`, { method: 'POST', body: JSON.stringify(data) }); clearDraft(`return-${t.id}`); toast(message); await refresh(); await openTicket(t.id); }
+    catch (error) { showError(error); }
+  };
+  document.querySelector('#accept-work').onclick = e => { e.currentTarget.disabled = true; send({ action: 'accept' }, 'Работа принята, заявка закрыта'); };
+  document.querySelector('#return-work').onclick = () => { const form = document.querySelector('#return-form'); form.hidden = false; form.elements.comment.focus(); };
+  document.querySelector('#cancel-return').onclick = () => { document.querySelector('#return-form').hidden = true; };
+  document.querySelector('#return-form').onsubmit = e => { e.preventDefault(); e.target.querySelector('button.primary').disabled = true; send({ action: 'return', comment: e.target.elements.comment.value }, 'Заявка возвращена на доработку'); };
 }
 function renderEstimate(ticket, estimates, staff) {
   const latest=estimates[0];
   const legacy=latest&&latest.effort_minutes===null;
   const canCreate=staff&&ticket.assignee_id===state.user.id&&ticket.status!=='closed'&&(!latest||legacy||['rejected','revision_requested'].includes(latest.state));
-  const canDecide=!staff&&(ticket.visibility!=='organization'||!state.organizations.some(o=>o.id===ticket.organization_id&&o.members.some(m=>m.user_id===state.user.id&&m.role==='viewer')))&&(ticket.customer_id===state.user.id||state.organizations.some(o=>o.id===ticket.organization_id&&o.members.some(m=>m.user_id===state.user.id&&m.role==='owner')))&&latest?.state==='pending'&&!legacy&&ticket.status!=='closed';
-  const history=estimates.map(e=>`<div class="estimate-version"><div class="row"><strong>Версия ${e.version} · ${e.effort_minutes===null?'Старая оценка без часов':hours(e.effort_minutes)}</strong><span class="badge">${estimateNames[e.state]||'Требуется новая оценка'}</span></div><div class="muted">Оценил ${esc(e.author_name)} · ${date(e.created_at)} · на оценку потрачено ${e.assessment_minutes} мин.</div>${e.note?`<p>${esc(e.note)}</p>`:''}${e.customer_comment?`<p>Комментарий заказчика: ${esc(e.customer_comment)}</p>`:''}${e.proposed_effort_minutes!==null?`<p>Предложение заказчика: ${hours(e.proposed_effort_minutes)}</p>`:''}</div>`).join('');
+  const canDecide=!staff&&ticket.can_decide&&latest?.state==='pending'&&!legacy&&ticket.status!=='closed';
+  const history=estimates.map(e=>`<div class="estimate-version"><div class="row"><strong>Версия ${e.version} · ${e.effort_minutes===null?'Старая оценка без часов':hours(e.effort_minutes)}</strong><span class="badge">${estimateNames[e.state]||'Требуется новая оценка'}</span></div><div class="muted">${staff ? 'Оценил ' + esc(e.author_name) : 'Оценка подготовлена'} · ${date(e.created_at)} · на оценку потрачено ${e.assessment_minutes} мин.</div>${e.note?`<p>${esc(e.note)}</p>`:''}${e.customer_comment?`<p>Комментарий заказчика: ${esc(e.customer_comment)}</p>`:''}${e.proposed_effort_minutes!==null?`<p>Предложение заказчика: ${hours(e.proposed_effort_minutes)}</p>`:''}</div>`).join('');
   const create=canCreate?`<form class="form" id="estimate-form"><label>Плановые трудозатраты, часов<input class="field" name="effort_hours" type="number" min="0.25" max="1666" step="0.25" required></label><label>Потрачено на оценку, минут<input class="field" name="minutes" type="number" min="1" max="100000" step="1" required></label><label>Пояснение к оценке<textarea name="note" maxlength="3000" placeholder="Что входит в работу"></textarea></label><button class="button primary">Отправить оценку заказчику</button></form>`:'';
-  const decide=canDecide?`<div class="row estimate-actions"><button class="button primary" id="approve-estimate">Одобрить</button><button class="button" id="reject-estimate">Отклонить</button></div><form class="form" id="revision-form"><label>Ваш вариант, часов (необязательно)<input class="field" name="effort_hours" type="number" min="0.25" max="1666" step="0.25"></label><label>Что скорректировать<textarea name="comment" maxlength="3000" placeholder="Напишите ваши пожелания"></textarea></label><button class="button">Запросить корректировку</button></form>`:'';
-  document.querySelector('.detail-grid>div:first-child>.panel.content').insertAdjacentHTML('afterend',`<section class="panel content estimate-panel"><h2>Оценка трудозатрат</h2>${legacy?'<div class="notice">Старая оценка была указана в деньгах. Нужна новая оценка в часах.</div>':''}${latest?history:'<p class="muted">Оценка ещё не подготовлена.</p>'}${create}${decide}</section>`);
-  const update=async(path,data)=>{try{await api(path,{method:'POST',body:JSON.stringify(data)});await refresh();await openTicket(ticket.id);}catch(error){showError(error);}};
-  document.querySelector('#estimate-form')?.addEventListener('submit',e=>{e.preventDefault();const data=new FormData(e.target);update(`/tickets/${ticket.id}/estimates`,{effort_minutes:Math.round(Number(data.get('effort_hours'))*60),assessment_minutes:Number(data.get('minutes')),note:data.get('note')});});
-  document.querySelector('#approve-estimate')?.addEventListener('click',()=>update(`/tickets/${ticket.id}/estimates/decision`,{estimate_id:latest.id,action:'approve'}));
-  document.querySelector('#reject-estimate')?.addEventListener('click',()=>update(`/tickets/${ticket.id}/estimates/decision`,{estimate_id:latest.id,action:'reject'}));
-  document.querySelector('#revision-form')?.addEventListener('submit',e=>{e.preventDefault();const data=new FormData(e.target);update(`/tickets/${ticket.id}/estimates/decision`,{estimate_id:latest.id,action:'request_revision',comment:data.get('comment'),proposed_effort_minutes:data.get('effort_hours')===''?null:Math.round(Number(data.get('effort_hours'))*60)});});
+  const decide=canDecide?`<div class="row estimate-actions"><button class="button primary" id="approve-estimate">Одобрить</button><button class="button" id="revise-estimate">Попросить поправить</button><button class="button" id="reject-estimate">Не согласен с оценкой</button></div><form class="form" id="revision-form" hidden><label>Ваш вариант, часов (необязательно)<input class="field" name="effort_hours" type="number" min="0.25" max="1666" step="0.25"></label><label>Что скорректировать<textarea name="comment" maxlength="3000" placeholder="Напишите ваши пожелания"></textarea></label><div class="row"><button class="button primary">Запросить корректировку</button><button type="button" class="button" id="cancel-revision">Отмена</button></div></form>`:'';
+  const estimateMoney=latest&&billingOn()?`<p class="notice">Работа по оценке: <strong>${Math.round((latest.effort_minutes||0)/60*(ticket.hourly_rate_rub||3000)).toLocaleString('ru-RU')} ₽</strong> (${hours(latest.effort_minutes||0)}). Созвоны и переписка учитываются отдельно по той же ставке. Текущий лимит сопровождения: <strong>${ticket.service_limit_minutes===null?'без ограничения':hours(ticket.service_limit_minutes)}</strong>. Лимит можно изменить ниже.</p>`:'';
+  const decline=!staff&&ticket.can_decline?`<div class="decline-box"><p class="muted">Эту заявку создала команда. Если задача не нужна, откажитесь — заявка закроется без работы и оплаты.</p><button type="button" class="button" id="decline-ticket">Отменить задачу</button><form class="form" id="decline-form" hidden><label>Почему не нужна (необязательно)<textarea name="comment" maxlength="3000" placeholder="Например: уже решили своими силами"></textarea></label><div class="row"><button class="button primary">Отказаться от заявки</button><button type="button" class="button" id="cancel-decline">Отмена</button></div></form></div>`:'';
+  document.querySelector('.detail-grid>div:first-child>.panel.content').insertAdjacentHTML('afterend',`<section class="panel content estimate-panel ${canCreate||canDecide?'needs-action':''}">${canCreate||canDecide?'<div class="eyebrow" style="color:var(--accent-ink);margin-bottom:6px">Ваше действие</div>':''}<h2>Оценка трудозатрат</h2>${legacy?'<div class="notice">Старая оценка была указана в деньгах. Нужна новая оценка в часах.</div>':''}${latest?history:'<p class="muted">Оценка ещё не подготовлена.</p>'}${estimateMoney}${create}${decide}${decline}</section>`);
+  document.querySelector('#decline-ticket')?.addEventListener('click',()=>{const form=document.querySelector('#decline-form');form.hidden=false;document.querySelector('#decline-ticket').hidden=true;form.elements.comment.focus();});
+  document.querySelector('#cancel-decline')?.addEventListener('click',()=>{document.querySelector('#decline-form').hidden=true;document.querySelector('#decline-ticket').hidden=false;});
+  document.querySelector('#decline-form')?.addEventListener('submit',e=>{e.preventDefault();e.target.querySelector('button.primary').disabled=true;update(`/tickets/${ticket.id}/decline`,{comment:e.target.elements.comment.value},'Заявка закрыта — команда получила уведомление');});
+  const update=async(path,data,message)=>{try{await api(path,{method:'POST',body:JSON.stringify(data)});if(message)toast(message);await refresh();await openTicket(ticket.id);}catch(error){showError(error);}};
+  document.querySelector('#estimate-form')?.addEventListener('submit',e=>{e.preventDefault();const data=new FormData(e.target);update(`/tickets/${ticket.id}/estimates`,{effort_minutes:Math.round(Number(data.get('effort_hours'))*60),assessment_minutes:Number(data.get('minutes')),note:data.get('note')},'Оценка отправлена заказчику');});
+  document.querySelector('#approve-estimate')?.addEventListener('click',()=>update(`/tickets/${ticket.id}/estimates/decision`,{estimate_id:latest.id,action:'approve'},'Оценка одобрена — команда приступит к работе'));
+  document.querySelector('#reject-estimate')?.addEventListener('click',()=>update(`/tickets/${ticket.id}/estimates/decision`,{estimate_id:latest.id,action:'reject'},'Оценка отклонена'));
+  document.querySelector('#revise-estimate')?.addEventListener('click',()=>{const form=document.querySelector('#revision-form');form.hidden=false;form.elements.effort_hours.focus();});
+  document.querySelector('#cancel-revision')?.addEventListener('click',()=>{document.querySelector('#revision-form').hidden=true;});
+  document.querySelector('#revision-form')?.addEventListener('submit',e=>{e.preventDefault();const data=new FormData(e.target);update(`/tickets/${ticket.id}/estimates/decision`,{estimate_id:latest.id,action:'request_revision',comment:data.get('comment'),proposed_effort_minutes:data.get('effort_hours')===''?null:Math.round(Number(data.get('effort_hours'))*60)},'Запрос на корректировку отправлен');});
 }
 function renderOperations(){
   const {ticket:t,time_entries=[],hour_requests=[],attachments=[]}=state.current;
   const staff=state.user.role!=='customer';
   const assigned=staff&&t.assignee_id===state.user.id;
-  const viewer=!staff&&t.visibility==='organization'&&state.organizations.some(o=>o.id===t.organization_id&&o.members.some(m=>m.user_id===state.user.id&&m.role==='viewer'));
-  const canDecide=!staff&&!viewer&&(t.customer_id===state.user.id||state.organizations.some(o=>o.id===t.organization_id&&o.members.some(m=>m.user_id===state.user.id&&m.role==='owner')));
+  const viewer=(staff&&t.can_write===false)||!staff&&t.visibility==='organization'&&state.organizations.some(o=>o.id===t.organization_id&&o.members.some(m=>m.user_id===state.user.id&&m.role==='viewer'));
+  const canDecide=!staff&&t.can_decide;
   const remaining=Math.max(0,(t.approved_minutes||0)-(t.actual_minutes||0));
   const progress=t.approved_minutes?Math.min(100,Math.round(t.actual_minutes/t.approved_minutes*100)):0;
   const requests=hour_requests.map(r=>`<div class="hours-request"><div class="row"><strong>+${hours(r.minutes)}</strong><span class="badge">${r.state==='approved'?'Одобрено':r.state==='rejected'?'Отклонено':'На согласовании'}</span></div><p>${esc(r.reason)}</p><small>${esc(r.author_name)} · ${date(r.created_at)}</small>${r.state==='pending'&&canDecide?`<div class="row"><button class="button primary" data-hours-approve="${r.id}">Одобрить часы</button><button class="button" data-hours-reject="${r.id}">Отклонить</button></div>`:''}</div>`).join('');
   const entries=time_entries.map(w=>`<div class="time-entry"><div class="row"><strong>${hours(w.minutes)}</strong><small>${date(w.created_at)}</small></div><p>${esc(w.note)}</p><small>${esc(w.author_name)}</small></div>`).join('');
-  const logForm=assigned&&['working','waiting','done'].includes(t.status)&&t.approved_minutes?`<form class="form" id="time-entry-form"><label>Фактически потрачено, часов<input class="field" type="number" name="hours" min="0.25" step="0.25" max="${remaining/60}" required></label><label>Что сделано<textarea name="note" required minlength="3" maxlength="2000" placeholder="Кратко опишите результат работы"></textarea></label><button class="button primary" ${remaining<15?'disabled':''}>Внести время</button></form>`:'';
-  const requestForm=assigned&&['working','waiting'].includes(t.status)&&t.approved_minutes&&!t.pending_hour_request?`<form class="form" id="hour-request-form"><label>Дополнительные часы<input class="field" type="number" name="hours" min="0.25" step="0.25" required></label><label>Почему нужны дополнительные часы<textarea name="reason" required minlength="3" maxlength="2000"></textarea></label><button class="button">Запросить согласование</button></form>`:'';
-  const deadlines=`<div class="meta deadline-meta"><div><label>Ответ клиенту</label><strong>${t.first_staff_response_at?'Ответили':t.response_due_at?date(t.response_due_at):'Не задано'}</strong></div><div><label>Оценка до</label><strong>${t.estimate_due_at?date(t.estimate_due_at):'Не задано'}</strong></div><div><label>Срок выполнения</label><strong>${t.delivery_due_at?date(t.delivery_due_at):'Не задан'}</strong></div></div>`;
+  const logForm=assigned&&['working','waiting','done'].includes(t.status)&&t.approved_minutes?`<form class="form" id="time-entry-form"><div><span>Фактически потрачено</span><div class="duration-inputs"><label>Часы<input class="field" type="number" name="hours" min="0" step="1" max="${Math.floor(remaining/60)}" placeholder="0" inputmode="numeric"></label><label>Минуты · необязательно<input class="field" type="number" name="minutes" min="0" max="60" step="1" placeholder="0" inputmode="numeric"></label></div><small>Например: 1 час и 30 минут. Пустое поле — 0. 60 минут = 1 час.</small></div><label>Что сделано<textarea name="note" required minlength="3" maxlength="2000" placeholder="Кратко опишите результат работы"></textarea></label><button class="button primary" ${remaining<1?'disabled data-permanently-disabled="true"':''}>Внести время</button>${remaining>0?`<button type="button" class="button" id="fill-remaining">Внести остаток ${hours(remaining)}</button>`:''}</form>`:'';
+  const requestForm=assigned&&['working','waiting'].includes(t.status)&&t.approved_minutes&&!t.pending_hour_request?`<form class="form" id="hour-request-form"><p class="muted">Запросите часы сверх согласованной оценки и укажите причину. После одобрения заказчиком лимит увеличится; фактически потраченное время нужно внести отдельно.</p><label>Дополнительные часы<input class="field" type="number" name="hours" min="0.25" step="0.25" required></label><label>Почему нужны дополнительные часы<textarea name="reason" required minlength="3" maxlength="2000"></textarea></label><button class="button">Запросить согласование</button></form>`:'';
   const deadlineForm=staff&&(state.user.role==='admin'||state.user.is_manager)?`<form class="deadline-form" id="deadline-form"><label>Установить срок выполнения<input class="field" type="datetime-local" name="due_at" value="${t.delivery_due_at?new Date(t.delivery_due_at).toLocaleString('sv-SE').replace(' ','T').slice(0,16):''}"></label><button class="button">Сохранить срок</button></form>`:'';
-  document.querySelector('.detail-grid>div:last-child').insertAdjacentHTML('beforeend',`<section class="panel content operations-panel"><h2>Сроки и контроль</h2>${deadlines}${deadlineForm}</section>`);
-  document.querySelector('.detail-grid>div:last-child').insertAdjacentHTML('beforeend', `<div id="git-links-container">${renderGitLinksPanel(t.id, staff)}</div>`);
+  document.querySelector('.detail-grid>div:last-child').insertAdjacentHTML('afterbegin',`<section class="panel content operations-panel"><h2>Сроки SLA</h2>${slaCard(t)}${deadlineForm}</section>`);
+  if (staff) document.querySelector('.detail-grid>div:last-child').insertAdjacentHTML('beforeend', `<div id="git-links-container">${renderGitLinksPanel(t.id, staff&&t.can_write!==false)}</div>`);
   const rateRub = t.hourly_rate_rub || 3000;
   const costRub = t.cost_rub || Math.round((t.approved_minutes || 0) / 60 * rateRub);
-  const actBadge = t.act_invoice ? `<span style="margin: 0 10px; color: var(--line)">|</span><a href="/api/billing/invoices/${t.act_invoice.id}/print" target="_blank" class="billing-doc-pill act" title="Открыть печатную форму акта">Акт №${esc(t.act_invoice.number)} ✓</a>` : '';
+  const actBadge = t.act_invoice ? `<span style="margin: 0 10px; color: var(--line)">|</span><a href="/api/billing/invoices/${t.act_invoice.id}/print" target="_blank" rel="noopener noreferrer" class="billing-doc-pill act" title="Открыть печатную форму акта">Акт №${esc(t.act_invoice.number)} ✓</a>` : '';
+  const serviceEntries = state.current.service_entries || [];
+  const serviceMins = t.service_minutes || 0;
+  const serviceTarget = { customer_id: t.customer_id, customer_name: t.customer_company || t.customer_name, ticket_id: t.id, reload: () => openTicket(t.id) };
+  const serviceList = serviceEntries.length ? serviceEntries.map(e => serviceEntryItem(e, { canDelete: e.author_id === state.user.id || isDispatcher() })).join('') : '<p class="muted">Созвонов и переписки по заявке пока не учтено.</p>';
+  const serviceTotal = billingOn() ? `<div class="hours-finance"><span>Стоимость для заказчика: <strong>${(t.total_cost_rub ?? costRub).toLocaleString('ru-RU')} ₽</strong></span><span style="margin: 0 10px; color: var(--line)">|</span><span>оценка ${costRub.toLocaleString('ru-RU')} ₽ + сопровождение ${(t.service_cost_rub || 0).toLocaleString('ru-RU')} ₽</span></div>` : '';
+  const clientService= !staff&&billingOn()?`<section class="panel content"><h2>Сопровождение и общая стоимость</h2><p>Созвоны и переписка оплачиваются сверх оценки по ставке ${rateRub.toLocaleString('ru-RU')} ₽/ч. В акте они идут строкой «Консультационное сопровождение и координация работ».</p><p>Учтено: <strong>${hours(serviceMins)} · ${(t.service_cost_rub||0).toLocaleString('ru-RU')} ₽</strong>. Стоимость согласованной работы и сопровождения: <strong>${(t.total_cost_rub??costRub).toLocaleString('ru-RU')} ₽</strong>.</p>${t.estimate_state==='pending'?'<p class="muted">Оценка ещё не согласована и в эту сумму не входит.</p>':''}<p>Лимит сопровождения: <strong>${t.service_limit_minutes===null?'без ограничения':hours(t.service_limit_minutes)}</strong>.</p>${canDecide&&t.status!=='closed'?`<form class="form" id="service-budget-form"><label>Лимит сопровождения, часов<input class="field" name="limit_hours" type="number" min="${serviceMins/60}" step="any" value="${t.service_limit_minutes===null?'':t.service_limit_minutes/60}" placeholder="Без ограничения"><small>0 — без дополнительного сопровождения. Пусто — без ограничения. Уже учтённые часы сохраняются.</small></label><button class="button">Сохранить лимит</button></form>`:''}</section>`:'';
+  const serviceSection = staff ? `<section class="panel content operations-panel"><div class="row contractor-time-header"><h2>Трудозатраты подрядчика</h2>${t.can_write!==false?`<button class="button small" type="button" id="open-service-form">${icon('clock', 14)}Учесть созвон или переписку</button>`:''}</div><div class="hours-summary contractor-time-summary"><div><small>Фактическая работа</small><strong>${hours(t.actual_minutes || 0)}</strong></div><div><small>Оценки и переоценки</small><strong>${hours(t.assessment_minutes || 0)}</strong></div><div><small>Сопровождение</small><strong>${hours(serviceMins)}</strong></div><div><small>Всего к учёту подрядчику</small><strong>${hours(t.contractor_total_minutes || 0)}</strong></div></div><p class="muted">Всего — фактически внесённая работа, время всех версий оценки (включая отклонённые и пересмотренные), учтённые созвоны и переписка. Время уточнений нужно внести вручную и привязать к этой заявке.</p>${serviceTotal}<p class="muted">Подробности записей видны только команде. Заказчик видит общие часы, стоимость и лимит сопровождения. Созвоны и переписка оплачиваются сверх оценки; в акте клиента они идут общей строкой «Консультационное сопровождение и координация работ».</p>${t.can_write!==false?serviceForm(serviceTarget, serviceEntries):''}${serviceList}</section>` : '';
   const financeHtml = `<div class="hours-finance"><span>Ставка: <strong>${rateRub.toLocaleString('ru-RU')} ₽/ч</strong></span><span style="margin: 0 10px; color: var(--line)">|</span><span>Стоимость: <strong>${costRub.toLocaleString('ru-RU')} ₽</strong></span>${actBadge}</div>`;
-  document.querySelector('.detail-grid>div:first-child').insertAdjacentHTML('beforeend',`<section class="panel content operations-panel"><h2>Фактические трудозатраты</h2><div class="hours-summary"><div><small>Согласовано</small><strong>${hours(t.approved_minutes||0)}</strong></div><div><small>Выполнено</small><strong>${hours(t.actual_minutes||0)}</strong></div><div><small>Осталось</small><strong>${hours(remaining)}</strong></div></div><div class="work-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${progress}" aria-label="Использовано согласованных часов"><span style="width:${progress}%"></span></div>${financeHtml}${logForm}${entries?`<h3>Записи времени</h3>${entries}`:'<p class="muted">Фактическое время пока не внесено.</p>'}${requests?`<h3>Дополнительные часы</h3>${requests}`:''}${requestForm}</section><section class="panel content operations-panel"><h2>Файлы</h2>${attachments.map(a=>`<a class="attachment-link" href="/api/attachments/${a.id}"><span>↧ ${esc(a.filename)}</span><small>${Math.ceil(a.size/1024)} КБ</small></a>`).join('')||'<p class="muted">Файлов пока нет.</p>'}${t.status!=='closed'&&!viewer?'<label class="upload-label">Прикрепить файл<input id="ticket-file" type="file" multiple accept=".png,.jpg,.jpeg,.webp,.gif,.pdf,.txt,.doc,.docx,.xls,.xlsx,.csv,.zip"></label>':''}</section>`);
+  document.querySelector('.detail-grid>div:first-child').insertAdjacentHTML('beforeend',`<section class="panel content operations-panel"><h2>Фактические трудозатраты</h2><div class="hours-summary"><div><small>Согласовано</small><strong>${hours(t.approved_minutes||0)}</strong></div><div><small>Выполнено</small><strong>${hours(t.actual_minutes||0)}</strong></div><div><small>Осталось</small><strong>${hours(remaining)}</strong></div></div><div class="work-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${progress}" aria-label="Использовано согласованных часов"><span style="width:${progress}%"></span></div>${billingOn()?financeHtml:''}${logForm}${entries?`<h3>Записи времени</h3>${entries}`:'<p class="muted">Фактическое время пока не внесено.</p>'}${requests?`<h3>Дополнительные часы</h3>${requests}`:''}${requestForm}</section>${serviceSection}${clientService}<section class="panel content operations-panel"><h2>Файлы</h2>${attachments.map(a=>`<a class="attachment-link" href="/api/attachments/${a.id}"><span>${icon('paperclip',14)} ${esc(a.filename)}</span><small>${Math.ceil(a.size/1024)} КБ</small></a>`).join('')||'<p class="muted">Файлов пока нет.</p>'}${t.status!=='closed'&&!viewer?'<label class="upload-label">Прикрепить файл<input id="ticket-file" type="file" multiple accept=".png,.jpg,.jpeg,.webp,.gif,.pdf,.txt,.doc,.docx,.xls,.xlsx,.csv,.zip"></label>':''}</section>`);
+  document.querySelector('#service-budget-form')?.addEventListener('submit',async e=>{e.preventDefault();const raw=e.target.elements.limit_hours.value;try{await api(`/tickets/${t.id}/service-budget`,{method:'PATCH',body:JSON.stringify({limit_minutes:raw===''?null:Math.round(Number(raw)*60)})});toast('Лимит сопровождения сохранён');await openTicket(t.id);}catch(error){showError(error);}});
   state.pendingOps ||= {};
   const submit=async(path,data,key)=>{try{await api(path,{method:'POST',body:JSON.stringify(data)});if(key)delete state.pendingOps[key];await refresh();await openTicket(t.id);}catch(error){showError(error);}};
-  document.querySelector('#time-entry-form')?.addEventListener('submit',e=>{e.preventDefault();e.target.querySelector('button').disabled=true;const form=new FormData(e.target);const key=`time-${t.id}`;const request_id=state.pendingOps[key] ||= crypto.randomUUID();submit(`/tickets/${t.id}/time-entries`,{minutes:Math.round(Number(form.get('hours'))*60),note:form.get('note'),request_id},key);});
+  const timeForm=document.querySelector('#time-entry-form');
+  const timeMinutes=()=>Number(timeForm.elements.hours.value)*60+Number(timeForm.elements.minutes.value);
+  const validateTime=()=>{
+    const minutes=timeMinutes();
+    timeForm.elements.hours.setCustomValidity(minutes<1?'Укажите время: хотя бы 1 минуту.':minutes>remaining?`Осталось ${hours(remaining)}. Для превышения лимита согласуйте дополнительные часы.`:'');
+  };
+  timeForm?.addEventListener('input',validateTime);
+  document.querySelector('#fill-remaining')?.addEventListener('click',()=>{
+    timeForm.elements.hours.value=String(Math.floor(remaining/60));
+    timeForm.elements.minutes.value=String(remaining%60);
+    validateTime();
+    timeForm.elements.note.focus();
+  });
+  document.querySelector('#time-entry-form')?.addEventListener('submit',e=>{e.preventDefault();validateTime();if(!e.target.reportValidity())return;e.target.querySelector('button').disabled=true;const form=new FormData(e.target);const key=`time-${t.id}`;const request_id=state.pendingOps[key] ||= crypto.randomUUID();submit(`/tickets/${t.id}/time-entries`,{minutes:timeMinutes(),note:form.get('note'),request_id},key);});
   document.querySelector('#hour-request-form')?.addEventListener('submit',e=>{e.preventDefault();e.target.querySelector('button').disabled=true;const form=new FormData(e.target);const key=`hours-${t.id}`;const request_id=state.pendingOps[key] ||= crypto.randomUUID();submit(`/tickets/${t.id}/hour-requests`,{minutes:Math.round(Number(form.get('hours'))*60),reason:form.get('reason'),request_id},key);});
   document.querySelectorAll('[data-hours-approve],[data-hours-reject]').forEach(button=>button.onclick=()=>submit(`/tickets/${t.id}/hour-requests/${button.dataset.hoursApprove||button.dataset.hoursReject}/decision`,{action:button.dataset.hoursApprove?'approve':'reject'}));
   document.querySelector('#ticket-file')?.addEventListener('change',async e=>{try{for(const file of e.target.files)await upload(`/tickets/${t.id}/attachments`,file);await refresh();await openTicket(t.id);}catch(error){showError(error);}});
+  if (staff) bindServiceForm(serviceTarget);
   document.querySelector('#deadline-form')?.addEventListener('submit',async e=>{e.preventDefault();const raw=e.target.elements.due_at.value;try{await api(`/tickets/${t.id}/deadline`,{method:'PATCH',body:JSON.stringify({due_at:raw?new Date(raw).toISOString():null})});await refresh();await openTicket(t.id);}catch(error){showError(error);}});
 }
+function serviceEntryItem(e, { showClient = false, canDelete = false } = {}) {
+  const billed = e.act_invoice_id ? `<a class="billing-doc-pill act" href="/api/billing/invoices/${e.act_invoice_id}/print" target="_blank" rel="noopener">Акт ${esc(e.act_number || '')}</a>` : '<span class="badge">Ждёт акта</span>';
+  const remove = canDelete && !e.act_invoice_id ? `<button class="button small" type="button" data-service-delete="${e.id}" aria-label="Удалить запись">Удалить</button>` : '';
+  const summary = e.client_summary ? `<div class="entry-summary"><span class="eyebrow">Итоги для клиента · ${e.shared_at ? `отправлены ${date(e.shared_at)}` : 'не отправлены'}</span><p>${esc(e.client_summary)}</p>${e.client_next_steps ? `<p><strong>Дальше:</strong> ${esc(e.client_next_steps)}</p>` : ''}</div>` : '';
+  const summaryAction = canDelete && !e.shared_at ? `<button class="button small" type="button" data-summary-edit="${e.id}">${icon('send', 13)}${e.client_summary ? 'Отправить итоги клиенту' : 'Итоги для клиента'}</button>` : '';
+  const summaryForm = canDelete && !e.shared_at ? `<form class="form summary-form" data-summary-form="${e.id}" hidden><label>О чём договорились<textarea name="summary" required minlength="3" maxlength="3000">${esc(e.client_summary || '')}</textarea></label><label>Что дальше<textarea name="next_steps" maxlength="2000">${esc(e.client_next_steps || '')}</textarea></label><small class="muted">Клиент увидит только итоги — без длительности и внутренней заметки.</small><div class="row"><button class="button primary small">Отправить клиенту</button><button class="button small" type="button" data-summary-cancel="${e.id}">Отмена</button></div></form>` : '';
+  return `<div class="time-entry"><div class="row"><strong>${hours(e.minutes)} · ${esc(serviceKindNames[e.kind] || e.kind)}</strong><small>${date(e.occurred_at)}</small></div><p>${esc(e.note)}</p>${summary}<div class="row"><small>${showClient ? `${esc(e.client_name)} · ` : ''}${esc(e.author_name)}${e.ticket_id ? ` · заявка №${e.ticket_id}` : ''}</small><span class="row">${summaryAction}${billed}${remove}</span></div>${summaryForm}</div>`;
+}
+function bindServiceDelete(after) {
+  document.querySelectorAll('[data-service-delete]').forEach(btn => btn.onclick = async () => {
+    if (!confirm('Удалить запись о времени?')) return;
+    try { await api(`/service-entries/${btn.dataset.serviceDelete}`, { method: 'DELETE' }); toast('Запись удалена'); await after(); } catch (error) { showError(error); }
+  });
+  document.querySelectorAll('[data-summary-edit]').forEach(btn => btn.onclick = () => { const form = document.querySelector(`[data-summary-form="${btn.dataset.summaryEdit}"]`); form.hidden = false; form.elements.summary.focus(); });
+  document.querySelectorAll('[data-summary-cancel]').forEach(btn => btn.onclick = () => { document.querySelector(`[data-summary-form="${btn.dataset.summaryCancel}"]`).hidden = true; });
+  document.querySelectorAll('[data-summary-form]').forEach(form => form.onsubmit = async e => {
+    e.preventDefault();
+    form.querySelector('button.primary').disabled = true;
+    try { await api(`/service-entries/${form.dataset.summaryForm}/summary`, { method: 'PATCH', body: JSON.stringify({ summary: form.elements.summary.value, next_steps: form.elements.next_steps.value, share: true }) }); toast('Итоги отправлены клиенту'); await after(); }
+    catch (error) { form.querySelector('button.primary').disabled = false; showError(error); }
+  });
+}
+function chatServiceTarget(chat) { return { customer_id: state.currentChat?.participants?.[0]?.id || chat.customer_id, customer_name: chat.customer_name, reload: () => openChat(chat.id) }; }
+function servicePendingMinutes(entries) { return entries.filter(e => !e.act_invoice_id).reduce((acc, e) => acc + e.minutes, 0); }
+function serviceBlock(entries) {
+  const pending = servicePendingMinutes(entries);
+  const list = entries.length ? entries.slice(0, 10).map(e => serviceEntryItem(e, { canDelete: e.author_id === state.user.id || isDispatcher() })).join('') : '<p class="muted">Записей пока нет.</p>';
+  return `<div class="info-block"><span class="eyebrow">Сопровождение${pending ? ` <span>${hours(pending)} к акту</span>` : ''}</span>${list}</div>`;
+}
+function serviceForm(target, entries) {
+  const pending = servicePendingMinutes(entries);
+  const customerTickets = target.ticket_id ? [] : state.tickets.filter(t => t.customer_id === target.customer_id && t.status !== 'closed');
+  const nowLocal = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  return `<form class="form chat-ticket-form service-form" id="service-form" hidden>
+    <strong>Учёт времени: ${esc(target.customer_name)}${target.ticket_id ? `, заявка №${target.ticket_id}` : ''}</strong>
+    <small class="muted">Клиент не видит длительность и заметку: в акте записи идут общей строкой по его ставке. Итоги встречи можно отправить ему отдельно.${pending ? ` Сейчас к акту: ${hours(pending)}.` : ''}</small>
+    <label>Вид<select class="field" name="kind">${Object.entries(serviceKindNames).map(([k, v]) => `<option value="${k}" ${k === 'call' ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
+    <label>Длительность, минут<input class="field" type="number" name="minutes" min="5" max="1440" step="5" required></label>
+    <label>Когда<input class="field" type="datetime-local" name="occurred_at" value="${nowLocal}" max="${nowLocal}"></label>
+    ${customerTickets.length ? `<label>Заявка (необязательно)<select class="field" name="ticket_id"><option value="">Без заявки</option>${customerTickets.map(t => `<option value="${t.id}">№${t.id} · ${esc(t.title)}</option>`).join('')}</select></label>` : ''}
+    <label>Что обсуждали (видно только команде)<textarea name="note" required minlength="3" maxlength="2000" placeholder="Например: созвон по срокам релиза"></textarea></label>
+    <fieldset class="summary-fields"><legend>Итоги для клиента <small>необязательно</small></legend>
+      <label>О чём договорились<textarea name="summary" maxlength="3000" placeholder="Например: обмен заказами запускаем 15 октября, формат — JSON"></textarea></label>
+      <label>Что дальше<textarea name="next_steps" maxlength="2000" placeholder="Например: до пятницы пришлём схему, от вас — доступ к API"></textarea></label>
+      <label class="check-row"><input type="checkbox" name="share">Отправить итоги клиенту</label>
+      <small class="muted">Клиент увидит только итоги — без длительности и внутренней заметки.</small>
+    </fieldset>
+    <div class="row"><button class="button primary">Внести время</button><button class="button" type="button" id="cancel-service">Отмена</button></div></form>`;
+}
+function bindServiceForm(target) {
+  const form = document.querySelector('#service-form');
+  if (!form) return;
+  document.querySelector('#open-service-form').onclick = () => { const ticketForm = document.querySelector('#chat-ticket-form'); if (ticketForm) ticketForm.hidden = true; form.hidden = false; form.elements.minutes.focus(); };
+  document.querySelector('#cancel-service').onclick = () => { form.hidden = true; };
+  form.elements.summary.addEventListener('input', () => { if (form.elements.summary.value.trim().length >= 3 && !form.dataset.shareTouched) form.elements.share.checked = true; });
+  form.elements.share.addEventListener('change', () => { form.dataset.shareTouched = '1'; });
+  form.onsubmit = async e => {
+    e.preventDefault();
+    const button = form.querySelector('button.primary');
+    button.disabled = true;
+    const data = new FormData(form);
+    const requestId = form.dataset.requestId || (form.dataset.requestId = crypto.randomUUID());
+    try {
+      await api('/service-entries', { method: 'POST', body: JSON.stringify({
+        customer_id: target.customer_id, kind: data.get('kind'), minutes: Number(data.get('minutes')), note: data.get('note'),
+        occurred_at: data.get('occurred_at') ? new Date(data.get('occurred_at')).toISOString() : null,
+        ticket_id: target.ticket_id || (data.get('ticket_id') ? Number(data.get('ticket_id')) : null), request_id: requestId,
+        summary: data.get('summary') || '', next_steps: data.get('next_steps') || '', share: data.get('share') === 'on'
+      }) });
+      toast(data.get('share') === 'on' ? 'Время внесено, итоги отправлены клиенту' : 'Время внесено');
+      await target.reload();
+    } catch (error) { button.disabled = false; showError(error); }
+  };
+  bindServiceDelete(target.reload);
+}
+function chatUnreadCount(id) { return state.notifications.filter(n => n.target === 'chat' && !n.read_at && n.chat_id === id).length; }
+function chatListPanel(activeId) {
+  const query = (state.chatSearch || '').trim().toLocaleLowerCase('ru-RU');
+  const items = state.chats.map(c => {
+    const unread = chatUnreadCount(c.id);
+    const hidden = query && ![c.customer_name, c.last_message].some(value => String(value || '').toLocaleLowerCase('ru-RU').includes(query));
+    return `<button class="chat-item ${c.id === activeId ? 'active' : ''}" data-chat="${c.id}" ${hidden ? 'hidden' : ''} ${c.id === activeId ? 'aria-current="true"' : ''}><span class="chat-logo" aria-hidden="true">${initials(c.customer_name)}</span><span class="chat-item-text"><strong>${esc(c.customer_name)}</strong><small>${esc(c.last_message || 'Диалог пока пуст')}</small></span><span class="chat-item-meta">${date(c.updated_at)}${unread ? `<span class="unread-count" aria-label="${unread} непрочитанных">${unread}</span>` : ''}</span></button>`;
+  }).join('');
+  return `<div class="inbox-list"><div class="inbox-list-head"><label class="inbox-search">${icon('search', 15)}<span class="visually-hidden">Поиск по диалогам</span><input type="search" id="chat-search" placeholder="Компания, заказчик или сообщение" value="${esc(state.chatSearch || '')}"></label></div><div class="inbox-items">${items || '<div class="empty"><strong>Диалогов пока нет</strong>Когда участник компании напишет в общий чат, диалог появится здесь.</div>'}</div></div>`;
+}
+function bindChatList() {
+  document.querySelectorAll('[data-chat]').forEach(el => el.onclick = () => openChat(Number(el.dataset.chat)));
+  document.querySelector('#chat-search')?.addEventListener('input', e => { state.chatSearch = e.target.value; const query = state.chatSearch.trim().toLocaleLowerCase('ru-RU'); document.querySelectorAll('.chat-item').forEach(el => { el.hidden = Boolean(query) && !el.textContent.toLocaleLowerCase('ru-RU').includes(query); }); });
+}
 function renderChats() {
-  const rows=state.chats.map(c=>`<button class="ticket-row chat-row" data-chat="${c.id}"><span><strong>${esc(c.customer_name)}</strong><small>${esc(c.last_message||'Диалог пока пуст')} · ${date(c.updated_at)}</small></span><span class="muted">${esc(c.assignee_name||'Без ответственного')}</span></button>`).join('');
-  const focus=state.chats[0];
-  const focusCard=focus?`<section class="focus-panel"><span class="focus-overline">Последний диалог</span><h2>${esc(focus.customer_name)}</h2><p>${esc(focus.last_message||'Сообщений пока нет')}</p><div class="focus-facts"><div><span>Ответственный</span><strong>${esc(focus.assignee_name||'Не назначен')}</strong></div><div><span>Обновлён</span><strong>${date(focus.updated_at)}</strong></div></div><button class="focus-link" id="focus-chat">Открыть диалог <span aria-hidden="true">↗</span></button></section>`:'';
-  shell('Общий чат','',`<div class="workspace-grid"><div class="panel"><div class="toolbar"><strong>Диалоги с заказчиками</strong><span class="muted">${state.chats.length}</span></div>${rows||'<div class="empty"><strong>Диалогов пока нет</strong>Когда заказчик напишет в общий чат, он появится здесь.</div>'}</div><div class="context-stack">${focusCard}${recentActivity()}</div></div>`);
-  document.querySelector('#focus-chat')?.addEventListener('click',()=>openChat(focus.id));
-  document.querySelectorAll('[data-chat]').forEach(el=>el.onclick=()=>openChat(Number(el.dataset.chat)));
+  const unread = state.notifications.filter(n => n.target === 'chat' && !n.read_at).length;
+  shell('Общий чат', '', `<section class="panel inbox no-thread">${chatListPanel(null)}<div class="inbox-empty"><div>${icon('chat', 28)}<p><strong>Выберите диалог</strong><br>Переписка с компанией откроется здесь.</p></div></div></section>`, { kicker: 'Переписка без привязки к заявке', lead: `${state.chats.length} ${plural(state.chats.length, ['диалог', 'диалога', 'диалогов'])}${unread ? ` · ${unread} ${plural(unread, ['непрочитанное', 'непрочитанных', 'непрочитанных'])}` : ''}` });
+  bindChatList();
 }
 async function openChat(id) {
+  if(state.view!=='chat'||state.currentChat?.chat?.id!==id)delayedLoading('Общий чат','list');
   try{state.currentChat=await api(`/chats/${id}`);state.view='chat';state.error='';render();}
   catch(error){showError(error);}
 }
 function renderChatDetail() {
-  const {chat,messages,linked_tickets=[],attachments=[]}=state.currentChat;
-  const staff=state.user.role!=='customer';
-  const dispatcher=state.user.role==='admin'||state.user.is_manager;
-  const assignee=dispatcher?`<select id="chat-assignee" aria-label="Ответственный за чат"><option value="">Без ответственного</option>${state.staff.map(x=>`<option value="${x.id}">${esc(x.name)}</option>`).join('')}</select>`:`<strong>${esc(chat.assignee_name||'Не назначен')}</strong>`;
-  const items=messages.map(m=>`<div class="message ${m.author_id===state.user.id?'mine':''}"><small>${esc(m.author_name)} · ${date(m.created_at)}</small>${esc(m.body)}${attachments.filter(a=>a.chat_message_id===m.id).map(a=>`<a class="attachment-link" href="/api/attachments/${a.id}">↧ ${esc(a.filename)}</a>`).join('')}</div>`).join('')||'<div class="empty">Начните разговор. Сообщение увидит наша команда.</div>';
-  shell(staff?`Чат · ${chat.customer_name}`:'Чат с компанией','',`${staff?'<button class="back" id="back-chats">← К диалогам</button>':''}<div class="detail-grid"><section class="panel"><div class="toolbar"><strong>Общий чат</strong><span class="muted">${messages.length} сообщений</span></div><div class="messages" id="chat-messages">${items}</div><form class="composer" id="chat-message-form"><textarea name="body" required maxlength="10000" aria-label="Сообщение" placeholder="Напишите сообщение..."></textarea><label class="upload-label">Файлы<input name="files" type="file" multiple accept=".png,.jpg,.jpeg,.webp,.gif,.pdf,.txt,.doc,.docx,.xls,.xlsx,.csv,.zip"></label><button class="button primary">Отправить</button></form></section><section class="panel content chat-info"><h2>Участники</h2><div class="meta"><div><label>Заказчик</label><strong>${esc(chat.customer_name)}</strong></div><div><label>Ответственный</label>${assignee}</div></div></section></div>`);
-  if(linked_tickets.length){document.querySelector('#chat-messages').insertAdjacentHTML('beforebegin',`<div class="linked-list"><strong>Заявки из этого чата</strong>${linked_tickets.map(t=>`<button class="button" data-linked-ticket="${t.id}">№${t.id} · ${esc(t.title)}</button>`).join('')}</div>`);document.querySelectorAll('[data-linked-ticket]').forEach(el=>el.onclick=()=>openTicket(Number(el.dataset.linkedTicket)));}
-  if(staff){
-    document.querySelectorAll('#chat-messages .message').forEach((el,index)=>{
-      const msg=messages[index];
-      if(msg.author_id===chat.customer_id&&!linked_tickets.some(t=>t.source_message_id===msg.id)){
-        el.insertAdjacentHTML('beforeend',`<button class="chat-to-ticket" data-message="${msg.id}">Создать заявку из сообщения</button>`);
+  const { chat, messages, participants = [], linked_tickets = [], attachments = [], service_entries = [], meeting_summaries = [] } = state.currentChat;
+  const staff = state.user.role !== 'customer';
+  const dispatcher = isDispatcher();
+  let lastDay = '';
+  const items = timeline(messages, meeting_summaries, m => messageHtml(m, { canReply: true,
+    header: `${esc(m.author_name)} · ${new Date(m.created_at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}`,
+    extra: attachments.filter(a => a.chat_message_id === m.id).map(a => `<a class="attachment-link" href="/api/attachments/${a.id}">${icon('paperclip', 14)}${esc(a.filename)}</a>`).join('') })).map(entry => {
+    const day = new Date(entry.at).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
+    const separator = day !== lastDay ? `<div class="day-separator">${day}</div>` : '';
+    lastDay = day;
+    return separator + entry.html;
+  }).join('') || '<div class="empty">Начните разговор. Сообщение увидит наша команда.</div>';
+  const otherTickets = state.tickets.filter(t => (chat.organization_id ? t.organization_id === chat.organization_id && t.visibility === 'organization' : t.customer_id === chat.customer_id) && !['done', 'closed'].includes(t.status) && !linked_tickets.some(l => l.id === t.id));
+  const ticketButton = t => `<button class="linked-ticket" data-linked-ticket="${t.id}"><span>№${t.id} · ${esc(t.title)}</span>${t.status ? `<span class="badge ${esc(t.status)}">${statusNames[t.status]}</span>` : ''}</button>`;
+  const assigneeSelect = dispatcher ? `<label class="select-inline"><span>Ведёт</span><select id="chat-assignee" aria-label="Ответственный за чат"><option value="">Без ответственного</option>${state.staff.map(x => `<option value="${x.id}">${esc(staffLabel(x))}</option>`).join('')}</select></label>` : '';
+  const info = `<div class="inbox-info" role="complementary" aria-label="О диалоге"><div class="info-block"><span class="eyebrow">${chat.organization_id ? 'Компания' : 'Заказчик'}</span><strong>${esc(chat.customer_name)}</strong></div>${chat.organization_id ? `<div class="info-block"><span class="eyebrow">Участники компании · ${participants.length}</span>${participants.map(p => `<div>${esc(p.name)}</div>`).join('')}<small class="muted">Все участники компании видят эту переписку.</small></div>` : ''}${staff ? `<div class="info-block"><span class="eyebrow">Ответственный</span><strong>${esc(chat.assignee_name || 'Не назначен')}</strong></div>` : ''}${linked_tickets.length ? `<div class="info-block"><span class="eyebrow">Заявки из этого чата <span>${linked_tickets.length}</span></span>${linked_tickets.map(ticketButton).join('')}</div>` : ''}${otherTickets.length ? `<div class="info-block"><span class="eyebrow">Открытые заявки <span>${otherTickets.length}</span></span>${otherTickets.slice(0, 5).map(ticketButton).join('')}</div>` : ''}${staff ? serviceBlock(service_entries) : ''}</div>`;
+  const thread = `<section class="inbox-thread"><div class="inbox-thread-head">${staff ? `<button class="icon-btn thread-back" id="back-chats" aria-label="К списку диалогов">←</button>` : ''}<span class="chat-logo" aria-hidden="true">${initials(staff ? chat.customer_name : 'Codari')}</span><div><strong>${esc(chat.organization_id ? chat.customer_name : staff ? chat.customer_name : 'Служба поддержки')}</strong><small>${chat.organization_id ? `Чат всей компании · ${participants.length} ${plural(participants.length, ['участник', 'участника', 'участников'])} · ` : ''}${messages.length} ${plural(messages.length, ['сообщение', 'сообщения', 'сообщений'])}</small></div>${staff ? `<button class="button small" type="button" id="open-service-form">${icon('clock', 14)}Учесть время</button>` : ''}${assigneeSelect}</div><div class="messages" id="chat-messages">${items}</div><form class="composer" id="chat-message-form">${replyBar('chat', chat.id)}<label class="visually-hidden" for="chat-body">Сообщение</label><textarea id="chat-body" data-draft="chat-${chat.id}" name="body" required maxlength="10000" placeholder="${staff ? `Ответить: ${esc(chat.customer_name)}` : 'Напишите сообщение команде…'}"></textarea><div class="composer-files" id="chat-files"></div><div class="composer-bar"><label class="upload-label">${icon('paperclip', 15)}Файлы<input name="files" type="file" multiple accept=".png,.jpg,.jpeg,.webp,.gif,.pdf,.txt,.doc,.docx,.xls,.xlsx,.csv,.zip"></label><span class="composer-hint">Ctrl + Enter — отправить</span><button class="button primary">Отправить</button></div></form></section>`;
+  shell(staff ? 'Общий чат' : 'Чат с командой', '', `<section class="panel inbox has-thread ${staff ? '' : 'customer'}">${staff ? chatListPanel(chat.id) : ''}${thread}${info}</section>`, { kicker: chat.organization_id ? 'Общий чат компании с командой поддержки' : staff ? 'Переписка без привязки к заявке' : 'Личный кабинет' });
+  if (staff) bindChatList();
+  document.querySelectorAll('[data-linked-ticket]').forEach(el => el.onclick = () => openTicket(Number(el.dataset.linkedTicket)));
+  if (staff) {
+    document.querySelectorAll('#chat-messages .message').forEach(el => {
+      const msg = messages.find(m => m.id === Number(el.dataset.msg));
+      if (msg && msg.author_role === 'customer' && !linked_tickets.some(t => t.source_message_id === msg.id)) {
+        el.querySelector('.msg-foot').insertAdjacentHTML('beforeend', `<button class="chat-to-ticket" data-message="${msg.id}">${icon('plus', 13)}Создать заявку из сообщения</button>`);
       }
     });
-    document.querySelector('#chat-message-form').insertAdjacentHTML('afterend','<form class="form chat-ticket-form" id="chat-ticket-form" hidden><strong>Новая заявка из чата</strong><label>Тема<input class="field" name="title" required minlength="3" maxlength="140"></label><input type="hidden" name="message_id"><div class="row"><button class="button primary">Создать заявку</button><button class="button" type="button" id="cancel-chat-ticket">Отмена</button></div></form>');
-    document.querySelectorAll('[data-message]').forEach(el=>el.onclick=()=>{const msg=messages.find(m=>m.id===Number(el.dataset.message));const form=document.querySelector('#chat-ticket-form');form.hidden=false;form.elements.message_id.value=msg.id;form.elements.title.value=msg.body.slice(0,100);form.elements.title.focus();});
-    document.querySelector('#cancel-chat-ticket').onclick=()=>document.querySelector('#chat-ticket-form').hidden=true;
-    document.querySelector('#chat-ticket-form').onsubmit=async e=>{e.preventDefault();const button=e.target.querySelector('button');button.disabled=true;try{const data=Object.fromEntries(new FormData(e.target));const ticket=await api(`/chats/${chat.id}/tickets`,{method:'POST',body:JSON.stringify({title:data.title,message_id:Number(data.message_id)})});await refresh();await openTicket(ticket.id);}catch(error){showError(error);}};
+    document.querySelector('#chat-message-form').insertAdjacentHTML('afterend', '<form class="form chat-ticket-form" id="chat-ticket-form" hidden><strong>Новая заявка из чата</strong><label>Тема<input class="field" name="title" required minlength="3" maxlength="140"></label><input type="hidden" name="message_id"><div class="row"><button class="button primary">Создать заявку</button><button class="button" type="button" id="cancel-chat-ticket">Отмена</button></div></form>' + serviceForm(chatServiceTarget(chat), service_entries));
+    document.querySelectorAll('[data-message]').forEach(el => el.onclick = () => { const msg = messages.find(m => m.id === Number(el.dataset.message)); const form = document.querySelector('#chat-ticket-form'); form.hidden = false; form.elements.message_id.value = msg.id; form.elements.title.value = msg.body.slice(0, 100); form.elements.title.focus(); });
+    document.querySelector('#cancel-chat-ticket').onclick = () => document.querySelector('#chat-ticket-form').hidden = true;
+    document.querySelector('#chat-ticket-form').onsubmit = async e => { e.preventDefault(); const button = e.target.querySelector('button.primary'); button.disabled = true; try { const data = Object.fromEntries(new FormData(e.target)); const ticket = await api(`/chats/${chat.id}/tickets`, { method: 'POST', body: JSON.stringify({ title: data.title, message_id: Number(data.message_id) }) }); await refresh(); await openTicket(ticket.id); } catch (error) { showError(error); } };
   }
-  document.querySelector('#back-chats')?.addEventListener('click',()=>setView('chats'));
-  if(dispatcher){document.querySelector('#chat-assignee').value=chat.assignee_id||'';document.querySelector('#chat-assignee').onchange=async e=>{try{await api(`/chats/${chat.id}/assignee`,{method:'PATCH',body:JSON.stringify({assignee_id:e.target.value?Number(e.target.value):null})});await refresh();await openChat(chat.id);}catch(error){showError(error);}};}
-  document.querySelector('#chat-message-form').onsubmit=async e=>{e.preventDefault();const button=e.target.querySelector('button');button.disabled=true;const requestId=e.target.dataset.requestId||(e.target.dataset.requestId=crypto.randomUUID());try{const files=[...e.target.elements.files.files];const message=await api(`/chats/${chat.id}/messages`,{method:'POST',body:JSON.stringify({body:new FormData(e.target).get('body'),request_id:requestId})});for(const file of files)await upload(`/chats/${chat.id}/attachments`,file,{message_id:message.id});await refresh();await openChat(chat.id);}catch(error){state.error=error.message;button.disabled=false;const alert=document.querySelector('.notice');if(alert)alert.textContent=state.error;else document.querySelector('main .top').insertAdjacentHTML('afterend',notice());}};
-  document.querySelector('#chat-messages').scrollTop=document.querySelector('#chat-messages').scrollHeight;
+  if (staff) bindServiceForm(chatServiceTarget(chat));
+  document.querySelector('#back-chats')?.addEventListener('click', () => setView('chats'));
+  if (dispatcher) { document.querySelector('#chat-assignee').value = chat.assignee_id || ''; document.querySelector('#chat-assignee').onchange = async e => { try { await api(`/chats/${chat.id}/assignee`, { method: 'PATCH', body: JSON.stringify({ assignee_id: e.target.value ? Number(e.target.value) : null }) }); await refresh(); await openChat(chat.id); } catch (error) { showError(error); } }; }
+  bindCtrlEnter('#chat-message-form');
+  document.querySelector('#chat-message-form').onsubmit = async e => { e.preventDefault(); const button = e.target.querySelector('button.primary'); button.disabled = true; const requestId = e.target.dataset.requestId || (e.target.dataset.requestId = crypto.randomUUID()); try { const files = [...e.target.elements.files.files]; const message = await api(`/chats/${chat.id}/messages`, { method: 'POST', body: JSON.stringify({ body: new FormData(e.target).get('body'), request_id: requestId, reply_to_id: replyToId('chat', chat.id) }) }); clearDraft(`chat-${chat.id}`); state.replyTo = null; for (const file of files) await upload(`/chats/${chat.id}/attachments`, file, { message_id: message.id }); state.justSent = true; await refresh(); await openChat(chat.id); } catch (error) { state.error = error.message; button.disabled = false; const alert = document.querySelector('.notice'); if (alert) alert.textContent = state.error; else document.querySelector('main .top').insertAdjacentHTML('afterend', notice()); } };
+  document.querySelector('#chat-messages').scrollTop = document.querySelector('#chat-messages').scrollHeight;
+  popLastMessage(document.querySelector('#chat-messages'));
+  bindChatFiles();
+  bindConversation('chat', chat.id, messages, state.currentChat.read_state);
 }
-function renderTeam() {
-  shell('Команда','',`<div class="detail-grid"><section class="panel content"><h2>Сотрудники</h2>${state.staff.map(x=>`<div class="team-person">${avatar(x)}<span><strong>${esc(x.name)}</strong><small>${esc(x.job_title||x.email)}</small></span><span class="badge">${x.role==='admin'?'Администратор':'Сотрудник'}</span></div>`).join('')}</section><section class="panel content"><h2>Добавить сотрудника</h2><form class="form" id="staff-form"><label>Имя<input class="field" name="name" required minlength="2"></label><label>Email<input class="field" name="email" type="email" required></label><label>Временный пароль<input class="field" name="password" type="password" required minlength="8"></label><button class="button primary">Добавить</button></form></section></div>`);
-  document.querySelector('#staff-form button').insertAdjacentHTML('beforebegin','<label>Роль<select class="field" name="staff_role"><option value="employee">Сотрудник · только свои заявки</option><option value="manager">Менеджер · вся очередь и назначение</option></select></label>');
-  document.querySelectorAll('.team-person .badge').forEach((badge,index)=>{
-    if(state.staff[index]?.is_manager) badge.textContent='Менеджер';
-  });
-  document.querySelector('#staff-form').onsubmit=async e=>{e.preventDefault();const button=e.target.querySelector('button');button.disabled=true;try{await api('/staff',{method:'POST',body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});state.error='';await refresh();}catch(error){showError(error);}};
-}
+function renderTeam() { TeamUI.render(); }
 function renderProfile(){
   const p=state.profile;
   if(!p)return;
   if(state.user.role==='customer'){
-    shell('Мой профиль','',`<div class="profile-layout"><section class="panel content profile-main"><div class="profile-heading customer-profile-heading">${avatar(p,'large')}<div><span class="eyebrow">Кабинет заказчика</span><h2>${esc(p.name)}</h2><p>${esc(p.company_name||'Добавьте название компании')}</p><small>${esc(p.email)}</small></div></div><form class="form" id="customer-profile-form"><label>Ваше имя<input class="field" name="name" required minlength="2" maxlength="100" autocomplete="name" value="${esc(p.name)}"></label><label>Компания или команда<input class="field" name="company_name" maxlength="150" autocomplete="organization" placeholder="Например, Студия Север" value="${esc(p.company_name)}"></label><label>Контактный телефон<input class="field" name="phone" type="tel" maxlength="40" autocomplete="tel" placeholder="+7 999 123-45-67" value="${esc(p.phone)}"></label><p class="profile-hint">Email для входа: <strong>${esc(p.email)}</strong></p><div class="profile-actions"><button class="button primary">Сохранить изменения</button><span id="profile-saved" role="status"></span></div></form></section><div class="profile-note"><span class="eyebrow">НА СВЯЗИ С КОМАНДОЙ</span><h2>Ваши обращения в одном месте</h2><p>Имя и название компании помогут команде узнавать ваши задачи в заявках и общем чате. Контактный телефон доступен только вам в этом кабинете.</p><div class="profile-facts"><div><strong>${state.tickets.length}</strong><span>заявок</span></div><div><strong>${state.chats.length}</strong><span>общих чатов</span></div></div></div></div>`);
+    shell('Мой профиль','',`<div class="profile-layout"><section class="panel content profile-main"><div class="profile-heading customer-profile-heading">${avatar(p,'large')}<div><span class="eyebrow">КАБИНЕТ ЗАКАЗЧИКА</span><h2>${esc(p.name)}</h2><p>${esc(p.company_name||'Добавьте название компании')}</p><small>${esc(p.email)}</small></div></div><form class="form" id="customer-profile-form"><label>Ваше имя<input class="field" name="name" required minlength="2" maxlength="100" autocomplete="name" value="${esc(p.name)}"></label><label>Компания или команда<input class="field" name="company_name" maxlength="150" autocomplete="organization" placeholder="Например, Студия Север" value="${esc(p.company_name)}"></label><label>Контактный телефон<input class="field" name="phone" type="tel" maxlength="40" autocomplete="tel" placeholder="+7 999 123-45-67" value="${esc(p.phone)}"></label><label>Одобрять оценки автоматически — до, часов<input class="field" name="auto_approve_hours" type="number" min="0" max="1666" step="0.25" placeholder="0" value="${p.auto_approve_minutes?p.auto_approve_minutes/60:''}"><small>Небольшие задачи в пределах лимита уйдут в работу сразу, без вашего подтверждения. Пусто или 0 — всегда спрашивать.</small></label><p class="profile-hint">Email для входа: <strong>${esc(p.email)}</strong></p><div class="profile-actions"><button class="button primary">Сохранить изменения</button><span id="profile-saved" role="status"></span></div></form></section><div class="profile-note"><span class="eyebrow">НА СВЯЗИ С КОМАНДОЙ</span><h2>Ваши обращения в одном месте</h2><p>Имя и название компании помогут команде узнавать ваши задачи в заявках и общем чате. Контактный телефон доступен только вам в этом кабинете.</p><div class="profile-facts"><div><strong>${state.tickets.length}</strong><span>заявок</span></div><div><strong>${state.chats.length}</strong><span>общих чатов</span></div></div></div></div>`);
     if(state.organizations[0]){document.querySelector('.customer-profile-heading p').textContent=state.organizations[0].name;document.querySelector('#customer-profile-form [name="company_name"]').parentElement.innerHTML=`Компания <strong>${esc(state.organizations[0].name)}</strong><input type="hidden" name="company_name" value="${esc(p.company_name)}"><small>Состав компании управляется в разделе «Моя компания».</small>`;}
-    document.querySelector('#customer-profile-form').onsubmit=async e=>{e.preventDefault();const button=e.target.querySelector('button');button.disabled=true;try{state.profile=await api('/customer-profile/me',{method:'PATCH',body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});state.user.name=state.profile.name;state.error='';renderProfile();document.querySelector('#profile-saved').textContent='Изменения сохранены';}catch(error){showError(error);}};
+    mountPushCard();
+    document.querySelector('#customer-profile-form').onsubmit=async e=>{e.preventDefault();const button=e.target.querySelector('button');button.disabled=true;try{const data=Object.fromEntries(new FormData(e.target));data.auto_approve_minutes=Math.round(Number(data.auto_approve_hours||0)*60);delete data.auto_approve_hours;state.profile=await api('/customer-profile/me',{method:'PATCH',body:JSON.stringify(data)});state.user.name=state.profile.name;state.error='';renderProfile();document.querySelector('#profile-saved').textContent='Изменения сохранены';}catch(error){showError(error);}};
     return;
   }
-  shell('Мой профиль','',`<div class="profile-layout"><section class="panel content profile-main"><div class="profile-heading"><div>${avatar(p,'large')}<label class="avatar-upload" for="avatar-file">Загрузить фото</label><input id="avatar-file" type="file" accept="image/png,image/jpeg,image/webp" hidden>${p.avatar_url?'<button class="avatar-remove" id="avatar-remove">Удалить фото</button>':''}</div><div><span class="eyebrow">Профиль сотрудника</span><h2>${esc(p.name)}</h2><p>${esc(p.job_title||'Укажите должность')}</p><small>${esc(p.email)}</small></div></div><form class="form" id="profile-form"><label>ФИО<input class="field" name="name" required minlength="2" maxlength="100" autocomplete="name" value="${esc(p.name)}"></label><label>Должность<input class="field" name="job_title" maxlength="100" placeholder="Например, ведущий разработчик" value="${esc(p.job_title)}"></label><label>О себе<textarea name="bio" maxlength="1000" placeholder="Чем вы помогаете заказчикам, ваш опыт и специализация">${esc(p.bio)}</textarea></label><div class="profile-actions"><button class="button primary">Сохранить изменения</button><span id="profile-saved" role="status"></span></div></form></section><aside class="profile-note"><span class="eyebrow">Как это работает</span><h2>Знакомое лицо в каждой заявке</h2><p>Заказчик увидит ваше имя, должность, описание и фотографию в заявках, за которые вы отвечаете. Это помогает понимать, с кем идёт работа.</p><p>Подойдёт PNG, JPEG или WebP до 2 МБ. Изображение автоматически подстроится под кабинет.</p></aside></div>`);
+  shell('Мой профиль','',`<div class="profile-layout"><section class="panel content profile-main"><div class="profile-heading"><div>${avatar(p,'large')}<label class="avatar-upload" for="avatar-file">Загрузить фото</label><input id="avatar-file" type="file" accept="image/png,image/jpeg,image/webp" hidden>${p.avatar_url?'<button class="avatar-remove" id="avatar-remove">Удалить фото</button>':''}</div><div><span class="eyebrow">ПРОФИЛЬ СОТРУДНИКА</span><h2>${esc(p.name)}</h2><p>${esc([(p.functions||[p.team_role]).filter(Boolean).map(c=>state.teamWorkspace?.functions.find(f=>f.code===c)?.name||teamRoleNames[c]||c).join(', '),p.job_title].filter(Boolean).join(' · ')||'Укажите должность')}</p><small>${esc(p.email)}</small></div></div><form class="form" id="profile-form"><label>ФИО<input class="field" name="name" required minlength="2" maxlength="100" autocomplete="name" value="${esc(p.name)}"></label><label>Должность<input class="field" name="job_title" maxlength="100" placeholder="Например, ведущий разработчик" value="${esc(p.job_title)}"></label><label>О себе<textarea name="bio" maxlength="1000" placeholder="Чем вы помогаете заказчикам, ваш опыт и специализация">${esc(p.bio)}</textarea></label><div class="profile-actions"><button class="button primary">Сохранить изменения</button><span id="profile-saved" role="status"></span></div></form></section><aside class="profile-note"><span class="eyebrow">КАК ЭТО РАБОТАЕТ</span><h2>Знакомое лицо в каждой заявке</h2><p>Заказчик увидит ваше имя, должность, описание и фотографию в заявках, за которые вы отвечаете. Это помогает понимать, с кем идёт работа.</p><p>Подойдёт PNG, JPEG или WebP до 2 МБ. Изображение автоматически подстроится под кабинет.</p></aside></div>`);
+  mountPushCard();
   document.querySelector('#profile-form').onsubmit=async e=>{e.preventDefault();const button=e.target.querySelector('button');button.disabled=true;try{state.profile=await api('/profile/me',{method:'PATCH',body:JSON.stringify(Object.fromEntries(new FormData(e.target)))});state.user.name=state.profile.name;state.error='';renderProfile();document.querySelector('#profile-saved').textContent='Изменения сохранены';}catch(error){showError(error);}};
   document.querySelector('#avatar-file').onchange=async e=>{const file=e.target.files?.[0];if(!file)return;if(file.size>2_000_000){showError(new Error('Фото должно быть меньше 2 МБ'));return;}try{const dataUrl=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(new Error('Не удалось прочитать файл'));reader.readAsDataURL(file);});state.profile=await api('/profile/me/avatar',{method:'POST',body:JSON.stringify({data_url:dataUrl})});await refresh();setView('profile');}catch(error){showError(error);}};
   document.querySelector('#avatar-remove')?.addEventListener('click',async()=>{try{state.profile=await api('/profile/me/avatar',{method:'DELETE'});await refresh();setView('profile');}catch(error){showError(error);}});
 }
-async function openMessengers(){try{state.bots=await api('/bots');state.view='messengers';state.error='';render();}catch(error){showError(error);}}
+async function openMessengers(){delayedLoading('Мессенджеры','list');try{state.bots=await api('/bots');state.view='messengers';state.error='';render();}catch(error){showError(error);}}
 function renderMessengers(){
   const info=state.bots;
   if(!info)return;
@@ -694,16 +1580,38 @@ function renderMessengers(){
   document.querySelectorAll('[data-unlink]').forEach(button=>button.onclick=async()=>{const p=button.dataset.unlink;if(!confirm(`Отключить ${labels[p]} от кабинета? Доступ бота и доставка уведомлений прекратятся.`))return;button.disabled=true;try{await api(`/bots/${p}`,{method:'DELETE'});if(state.pairings)delete state.pairings[p];await openMessengers();}catch(error){showError(error);}});
   document.querySelector('#bot-preferences').onsubmit=async event=>{event.preventDefault();const form=event.target;form.querySelector('button').disabled=true;try{await api('/bots/preferences',{method:'PUT',body:JSON.stringify(Object.fromEntries(new FormData(form)))});state.bots.channel=form.elements.channel.value;document.querySelector('#bot-saved').textContent='Настройки сохранены';}catch(error){showError(error);}finally{form.querySelector('button').disabled=false;}};
 }
-function renderOrganizations(){
-  const dispatcher=state.user.role==='admin'||state.user.is_manager;
-  const cards=state.organizations.map(org=>`<section class="panel content organization-card"><div class="row"><h2>${esc(org.name)}</h2><span class="badge">${org.members.length} участников</span></div><div class="org-members">${org.members.map(m=>`<div class="team-person org-person"><span><strong>${esc(m.name)}</strong><small>${esc(m.email)}</small></span>${dispatcher?`<span class="org-person-actions"><select class="field" data-member-role="${m.user_id}" data-org="${org.id}" aria-label="Роль ${esc(m.name)}"><option value="owner" ${m.role==='owner'?'selected':''}>Владелец</option><option value="member" ${m.role==='member'?'selected':''}>Участник</option><option value="viewer" ${m.role==='viewer'?'selected':''}>Наблюдатель</option></select><button class="button" data-remove-member="${m.user_id}" data-org="${org.id}" aria-label="Удалить ${esc(m.name)} из компании">Убрать</button></span>`:`<span class="badge">${m.role==='owner'?'Владелец':m.role==='viewer'?'Наблюдатель':'Участник'}</span>`}</div>`).join('')}</div>${dispatcher?`<form class="form org-member-form" data-org="${org.id}"><label>Email зарегистрированного заказчика<input class="field" name="email" type="email" required></label><label>Роль<select class="field" name="role"><option value="member">Участник</option><option value="viewer">Наблюдатель</option><option value="owner">Владелец</option></select></label><button class="button">Добавить в компанию</button></form>`:''}</section>`).join('');
-  const create=dispatcher?`<section class="panel content"><h2>Создать компанию заказчика</h2><p class="muted">Владелец и участники должны иметь отдельные зарегистрированные кабинеты.</p><form class="form" id="org-form"><label>Название компании<input class="field" name="name" minlength="2" maxlength="150" required></label><label>Владелец<select class="field" name="owner_id" required><option value="">Выберите заказчика</option>${state.customers.map(c=>`<option value="${c.id}">${esc(c.name)} · ${esc(c.email)}</option>`).join('')}</select></label><button class="button primary">Создать компанию</button></form></section>`:'';
-  shell(dispatcher?'Компании заказчиков':'Моя компания','',`<p class="muted">Заявки компании видны её участникам, если при создании выбрана видимость «Вся компания». Личные заявки видит только их автор.</p><div class="org-grid">${cards||`<div class="panel content empty">${dispatcher?'Компаний пока нет. Создайте первую справа.':'Вы пока не состоите в компании. Менеджер добавит вас после регистрации.'}</div>`}${create}</div>`);
-  document.querySelector('#org-form')?.addEventListener('submit',async e=>{e.preventDefault();const data=Object.fromEntries(new FormData(e.target));try{await api('/organizations',{method:'POST',body:JSON.stringify({name:data.name,owner_id:Number(data.owner_id)})});await refresh();setView('organizations');}catch(error){showError(error);}});
-  document.querySelectorAll('.org-member-form').forEach(form=>form.onsubmit=async e=>{e.preventDefault();try{await api(`/organizations/${form.dataset.org}/members`,{method:'POST',body:JSON.stringify(Object.fromEntries(new FormData(form)))});await refresh();setView('organizations');}catch(error){showError(error);}});
-  document.querySelectorAll('[data-member-role]').forEach(select=>select.onchange=async()=>{try{await api(`/organizations/${select.dataset.org}/members/${select.dataset.memberRole}`,{method:'PATCH',body:JSON.stringify({role:select.value})});await refresh();setView('organizations');}catch(error){showError(error);}});
-  document.querySelectorAll('[data-remove-member]').forEach(button=>button.onclick=async()=>{if(!confirm('Убрать участника из компании? Доступ к общим заявкам прекратится.'))return;try{await api(`/organizations/${button.dataset.org}/members/${button.dataset.removeMember}`,{method:'DELETE'});await refresh();setView('organizations');}catch(error){showError(error);}});
+function renderCredentials(){
+  app.innerHTML = `<main class="auth-main"><section class="auth-card"><h1>Замените временные данные</h1><p class="lead">Укажите свой email и новый пароль. После сохранения откроется кабинет вашей компании.</p>${notice()}<form class="form" id="credentials-form"><label>Ваш email<input class="field" name="email" type="email" autocomplete="email" required maxlength="254"></label><label>Временный пароль<input class="field" name="current_password" type="password" autocomplete="current-password" required minlength="8" maxlength="128"></label><label>Новый пароль<input class="field" name="password" type="password" autocomplete="new-password" required minlength="8" maxlength="128"></label><label>Повторите новый пароль<input class="field" name="confirm_password" type="password" autocomplete="new-password" required minlength="8" maxlength="128"></label><button class="button primary">Сохранить и открыть кабинет</button></form><button class="button" id="credentials-logout" type="button">Выйти</button></section></main>`;
+  document.querySelector('#credentials-logout').onclick=async()=>{await api('/logout',{method:'POST'});state.user=null;resetAccountState();initRealtime();state.error='';render();};
+  document.querySelector('#credentials-form').onsubmit=async e=>{
+    e.preventDefault();const form=e.target;const button=form.querySelector('button');const data=Object.fromEntries(new FormData(form));
+    if(data.password!==data.confirm_password){state.error='Новые пароли не совпадают';const noticeBox=document.createElement('div');noticeBox.className='notice';noticeBox.setAttribute('role','alert');noticeBox.textContent=state.error;form.querySelector('.notice')?.remove();form.prepend(noticeBox);return;}
+    delete data.confirm_password;button.disabled=true;
+    try{state.user=await api('/account/credentials',{method:'POST',body:JSON.stringify(data)});state.error='';await refresh();await openHash();initRealtime();}
+    catch(error){form.querySelector('.notice')?.remove();const box=document.createElement('div');box.className='notice';box.setAttribute('role','alert');box.textContent=error.message;form.prepend(box);button.disabled=false;}
+  };
 }
+
+function renderOrganizations(){
+  const dispatcher=isDispatcher();
+  const owns=org=>dispatcher||org.members.some(m=>m.user_id===state.user.id&&m.role==='owner');
+  const cards=state.organizations.map(org=>{const manage=owns(org);return `<section class="panel content organization-card" data-org-card="${org.id}"><div class="row org-card-heading"><div class="org-company-name"><span class="org-company-icon" aria-hidden="true">${icon('building',20)}</span><h2>${esc(org.name)}</h2></div><span class="badge">${org.members.length} ${plural(org.members.length,['участник','участника','участников'])}</span></div>${!org.has_available_owner?`<div class="notice">Нет владельца с действующим доступом. ${manage?'Назначьте активного участника владельцем или пригласите нового.':'Откройте общую заявку и отправьте запрос менеджеру на восстановление согласования.'}</div>`:''}<div class="org-members">${org.members.map(m=>`<div class="team-person org-person"><span class="org-member-identity">${avatar(m,'small')}<span><strong>${esc(m.name)}</strong><small>${esc(m.email)}${m.must_change_credentials?' · ждём активацию':''}${!m.active?' · доступ отключён':''}</small></span></span>${manage?`<span class="org-person-actions"><select class="field" data-member-role="${m.user_id}" data-org="${org.id}" aria-label="Роль ${esc(m.name)}">${['owner','member','viewer'].map(role=>`<option value="${role}" ${m.role===role?'selected':''}>${{owner:'Владелец',member:'Участник',viewer:'Наблюдатель'}[role]}</option>`).join('')}</select><button class="button" data-remove-member="${m.user_id}" data-org="${org.id}" aria-label="Удалить ${esc(m.name)} из компании">${icon('close',16)}</button></span>`:`<span class="badge">${{owner:'Владелец',member:'Участник',viewer:'Наблюдатель'}[m.role]}</span>`}</div>`).join('')}</div>${manage?`<details class="estimate-inline"><summary>Добавить участника</summary><div data-invite-host="${org.id}"></div></details>`:''}${dispatcher?org.members.filter(m=>m.must_change_credentials&&m.email.endsWith('@access.local')).map(m=>`<section class="content"><p>Временный доступ: ${esc(m.name)} · до ${date(m.temporary_credentials_expires_at)}</p><button class="button" data-renew-owner="${m.user_id}" ${m.active?'':'disabled data-permanently-disabled="true"'}>Выдать новые временные данные</button><div data-owner-access="${m.user_id}" role="status"></div></section>`).join(''):''}</section>`;}).join('');
+  const managed=state.organizations.some(owns);
+  const memberCount=state.organizations.reduce((total,org)=>total+org.members.length,0);
+  const roles=`<details class="org-role-guide"><summary>Как устроены роли и доступ</summary><dl><div><dt>Владелец</dt><dd>Согласует оценки и общие работы компании.</dd></div><div><dt>Участник</dt><dd>Создаёт заявки и ведёт переписку.</dd></div><div><dt>Наблюдатель</dt><dd>Читает общие заявки без внесения изменений.</dd></div></dl></details>`;
+  shell(dispatcher?'Компании и клиенты':'Моя компания',dispatcher?`<button class="button primary" id="org-add-client">${icon('plus',16)}Добавить клиента</button>`:'',`<div class="organizations-workspace"><div class="org-summary"><span><strong>${state.organizations.length}</strong> ${plural(state.organizations.length,['компания','компании','компаний'])}</span><span><strong>${memberCount}</strong> ${plural(memberCount,['участник','участника','участников'])}</span><span class="muted">Общие заявки и доступ клиентов</span></div><div class="org-layout"><div class="org-directory"><div class="org-directory-toolbar"><h2>Компании <span class="muted" id="org-search-count">${state.organizations.length}</span></h2><label class="org-search">${icon('search',16)}<input type="search" id="org-search" aria-label="Поиск компании или участника" placeholder="Компания, имя или email" value="${esc(state.organizationSearch||'')}"></label></div><div class="org-grid">${cards||'<section class="panel content empty"><h2>Компаний пока нет</h2><p>Добавьте клиента и укажите компанию, чтобы объединить заявки и участников.</p></section>'}</div><section class="panel content empty" id="org-no-results" hidden><h2>Ничего не найдено</h2><p>Попробуйте другое название, имя или email.</p></section>${dispatcher||managed?'<section class="panel content org-invitations"><h2>Приглашения и доступ</h2><p class="muted">Активация кабинетов и доставка приглашений.</p><div id="invitation-list">Загружаем статусы…</div></section>':''}</div><aside class="org-sidebar">${dispatcher?'<section class="panel content org-create"><span class="eyebrow">Новый контакт</span><h2>Добавить клиента</h2><div data-invite-host="new"></div></section>':''}${roles}</aside></div></div>`,{kicker:'Клиенты и доступ',lead:'Управляйте компаниями, участниками и приглашениями в кабинет.'});
+  const search=document.querySelector('#org-search');
+  const filterCompanies=()=>{state.organizationSearch=search.value;const query=search.value.trim().toLocaleLowerCase('ru');let count=0;document.querySelectorAll('[data-org-card]').forEach(card=>{const org=state.organizations.find(o=>String(o.id)===card.dataset.orgCard);const text=[org.name,...org.members.flatMap(m=>[m.name,m.email])].join(' ').toLocaleLowerCase('ru');card.hidden=!text.includes(query);if(!card.hidden)count++;});document.querySelector('#org-no-results').hidden=!query||count>0;document.querySelector('#org-search-count').textContent=count;};
+  search.addEventListener('input',filterCompanies);filterCompanies();
+  document.querySelector('#org-add-client')?.addEventListener('click',()=>{const input=document.querySelector('[data-invite-host="new"] input');input?.scrollIntoView({block:'center',behavior:'smooth'});input?.focus({preventScroll:true});});
+  state.organizations.filter(owns).forEach(org=>mountCustomerInvitation(document.querySelector(`[data-invite-host="${org.id}"]`),org.id));
+  if(dispatcher)mountCustomerInvitation(document.querySelector('[data-invite-host="new"]'));
+  mountInvitationList();
+  document.querySelectorAll('[data-member-role]').forEach(select=>{const original=select.value;select.onchange=async()=>{try{await api(`/organizations/${select.dataset.org}/members/${select.dataset.memberRole}`,{method:'PATCH',body:JSON.stringify({role:select.value})});await refresh();}catch(error){select.value=original;showError(error);}};});
+  document.querySelectorAll('[data-remove-member]').forEach(button=>button.onclick=async()=>{if(!confirm('Убрать участника из компании? Доступ к общим заявкам прекратится.'))return;try{await api(`/organizations/${button.dataset.org}/members/${button.dataset.removeMember}`,{method:'DELETE'});await refresh();}catch(error){showError(error);}});
+  document.querySelectorAll('[data-renew-owner]').forEach(button=>button.onclick=async()=>{button.disabled=true;try{const access=await api(`/company-owners/${button.dataset.renewOwner}/temporary-access`,{method:'POST'});const host=document.querySelector(`[data-owner-access="${button.dataset.renewOwner}"]`);host.innerHTML=`<label>Временный логин<input class="field" readonly value="${esc(access.login)}"></label><label>Временный пароль<input class="field" readonly value="${esc(access.temporary_password)}"></label><p>До ${date(access.expires_at)}. Сохраните данные и передайте владельцу.</p>`;state.organizations=await api('/organizations');}catch(error){showError(error);}finally{button.disabled=false;}});
+}
+
 async function openAnalytics(){
   setView('analytics');
   try{
@@ -713,23 +1621,30 @@ async function openAnalytics(){
     showError(err);
   }
 }
-function renderAnalytics(){
-  if(!state.analytics){
-    shell('Аналитика и SLA','','<div class="panel content"><p class="muted">Загрузка аналитики...</p></div>');
+function renderAnalytics() {
+  if (!state.analytics) {
+    shell('Аналитика и SLA', '', skeleton('analytics'), { kicker: 'Сроки, качество и нагрузка' });
     return;
   }
-  const a=state.analytics;
-  const staffTable=(a.staff_stats||[]).map(s=>`<tr><td><strong>${esc(s.name)}</strong></td><td class="muted">${esc(s.job_title)}</td><td><strong>${s.active_tickets}</strong></td><td>${s.closed_tickets}</td><td><strong>${hours(s.logged_minutes)}</strong></td><td>${s.avg_rating?`<span style="color:#d97706;font-weight:800">★ ${s.avg_rating}</span>`:'<span class="muted">—</span>'}</td></tr>`).join('');
-  const csatTotal=a.total_ratings||1;
-  const csatBars=[5,4,3,2,1].map(stars=>{
-    const count=a.csat_distribution[stars]||0;
-    const pct=Math.round(count/csatTotal*100);
-    return `<div class="csat-bar-row"><span>${stars} ★</span><div class="csat-bar-track"><div class="csat-bar-fill" style="width:${pct}%"></div></div><span class="muted">${count}</span></div>`;
-  }).join('');
-  const feedbackList=(a.recent_feedback||[]).map(f=>`<div class="activity-item"><span class="activity-dot fresh"></span><div><div class="row"><strong>№${f.ticket_id} · ${esc(f.customer_name)}</strong><span style="color:#d97706;font-weight:800">★ ${f.rating}</span></div><p style="margin:4px 0 2px;font-size:13px">«${esc(f.comment)}»</p><small class="muted">${date(f.rated_at)}</small></div></div>`).join('');
-  const serviceRows=Object.entries(a.service_breakdown||{}).map(([k,cnt])=>`<div class="row" style="padding:6px 0;border-bottom:1px solid var(--border)"><span>${serviceNames[k]||k}</span><strong>${cnt}</strong></div>`).join('');
-  const body=`<div class="analytics-top-bar"><span class="muted">Комплексная сводка по SLA, качеству сервиса и эффективности</span><a class="button primary" href="/api/analytics/export.csv" download>📥 Скачать отчёт (CSV)</a></div><div class="analytics-grid"><div class="kpi-card"><span class="kpi-label">Всего заявок</span><div class="kpi-val accent">${a.total_tickets}</div><div class="kpi-hint">${a.open_tickets} в работе · ${a.done_tickets} закрыто</div></div><div class="kpi-card"><span class="kpi-label">Первый ответ (FRT)</span><div class="kpi-val">${a.avg_response_minutes<60?`${a.avg_response_minutes} мин`:`${(a.avg_response_minutes/60).toFixed(1)} ч`}</div><div class="kpi-hint">Соблюдение SLA: <strong>${a.sla_response_met_pct}%</strong></div></div><div class="kpi-card"><span class="kpi-label">Соблюдение оценки</span><div class="kpi-val">${a.sla_estimate_met_pct}%</div><div class="kpi-hint">Подготовка оценки трудозатрат</div></div><div class="kpi-card"><span class="kpi-label">Соблюдение сдачи</span><div class="kpi-val">${a.sla_delivery_met_pct}%</div><div class="kpi-hint">Завершение заявок до дедлайна</div></div><div class="kpi-card"><span class="kpi-label">Индекс CSAT</span><div class="kpi-val" style="color:#d97706">${a.avg_csat?`★ ${a.avg_csat}`:'—'}</div><div class="kpi-hint">${a.total_ratings} ${a.total_ratings===1?'оценка':'оценок'} от заказчиков</div></div></div><div class="analytics-split"><section class="panel content"><h2>Эффективность и нагрузка специалистов</h2><table class="staff-table"><thead><tr><th>Сотрудник</th><th>Роль</th><th>В работе</th><th>Закрыто</th><th>Списано</th><th>CSAT</th></tr></thead><tbody>${staffTable||'<tr><td colspan="6" class="muted">Нет данных</td></tr>'}</tbody></table></section><div class="context-stack"><section class="panel content"><h2>Удовлетворённость (CSAT)</h2><div class="csat-bars">${csatBars}</div></section><section class="panel content"><h2>Услуги по направлениям</h2><div style="margin-top:10px">${serviceRows||'<p class="muted">Пока нет данных</p>'}</div></section></div></div>${feedbackList?`<section class="activity-panel" style="margin-top:20px"><div class="activity-heading"><h2>Отзывы и комментарии заказчиков</h2><span>${(a.recent_feedback||[]).length}</span></div>${feedbackList}</section>`:''}`;
-  shell('Аналитика и SLA','',body);
+  const a = state.analytics;
+  const target = 90;
+  const pct = value => Math.round(Number(value) || 0);
+  const frt = a.avg_response_minutes < 60 ? `${a.avg_response_minutes} мин` : `${(a.avg_response_minutes / 60).toLocaleString('ru-RU', { maximumFractionDigits: 1 })} ч`;
+  const stat = (label, value, hint, cls = '') => `<div class="stat ${cls}"><span class="stat-label">${label}</span><strong>${value}</strong><small>${hint}</small></div>`;
+  const goal = value => pct(value) >= target ? `<span class="trend-up">цель ${target}% достигнута</span>` : `<span class="trend-down">ниже цели ${target}%</span>`;
+  const stats = `<div class="stats five">${stat('Всего заявок', a.total_tickets, `${a.open_tickets} в работе · ${a.done_tickets} закрыто`)}${stat('Первый ответ', frt, `в срок ${pct(a.sla_response_met_pct)}%`)}${stat('Оценка в срок', `${pct(a.sla_estimate_met_pct)}%`, goal(a.sla_estimate_met_pct))}${stat('Сдача в срок', `${pct(a.sla_delivery_met_pct)}%`, goal(a.sla_delivery_met_pct))}${stat('Оценка клиентов', a.avg_csat ? `${String(a.avg_csat).replace('.', ',')} из 5` : '—', `${a.total_ratings} ${plural(a.total_ratings, ['отзыв', 'отзыва', 'отзывов'])}`)}</div>`;
+  const meter = (label, value, hint) => `<div class="sla-meter"><div class="sla-meter-head"><span>${label}</span><strong>${pct(value)}%</strong></div><div class="sla-meter-track" role="img" aria-label="${label}: ${pct(value)}% при цели ${target}%"><span class="${pct(value) < target ? 'below' : ''}" style="width:${Math.min(100, pct(value))}%"></span><i style="left:${target}%"></i></div><small>${hint}</small></div>`;
+  const staffRows = (a.staff_stats || []).map(s => `<tr><td><div class="person-cell">${avatar(personById(s.id) || { name: s.name }, 'small')}<div><strong>${esc(s.name)}</strong><small>${esc(s.job_title || '')}</small></div></div></td><td class="num"><strong>${s.active_tickets}</strong></td><td class="num">${s.closed_tickets}</td><td class="num"><strong>${hours(s.logged_minutes)}</strong></td><td class="num">${s.avg_rating ? `<span class="rating">★ ${s.avg_rating}</span>` : '<span class="muted">—</span>'}</td></tr>`).join('');
+  const csatTotal = a.total_ratings || 1;
+  const csatBars = [5, 4, 3, 2, 1].map(stars => { const count = a.csat_distribution?.[stars] || 0; return `<div class="csat-bar-row"><span>${stars} ★</span><div class="meter"><span class="${stars <= 2 ? 'soon' : ''}" style="width:${Math.round(count / csatTotal * 100)}%"></span></div><span>${count}</span></div>`; }).join('');
+  const colors = ['#137b69', '#3a7fc4', '#d99a2b', '#8a6bc4', '#a9bdb7'];
+  const services = Object.entries(a.service_breakdown || {});
+  const servicesTotal = services.reduce((sum, [, count]) => sum + count, 0) || 1;
+  const serviceBar = services.map(([, count], index) => `<span style="width:${count / servicesTotal * 100}%;background:${colors[index % colors.length]}"></span>`).join('');
+  const serviceRows = services.map(([key, count], index) => `<span><b style="background:${colors[index % colors.length]}"></b>${esc(serviceLabel(key))}</span><strong>${count}</strong>`).join('');
+  const feedback = (a.recent_feedback || []).map(f => `<div class="activity-item"><span class="activity-dot fresh"></span><div><div class="row" style="justify-content:space-between"><strong>№${f.ticket_id} · ${esc(f.customer_name)}</strong><span class="rating">★ ${f.rating}</span></div>${f.comment ? `<p>«${esc(f.comment)}»</p>` : ''}<small>${date(f.rated_at)}</small></div></div>`).join('');
+  const body = `${stats}<div class="split"><div class="context-stack"><section class="panel content"><div class="card-head"><h2>Соблюдение SLA</h2><span class="legend"><span><b style="background:var(--accent)"></b>цель достигнута</span><span><b style="background:#d99a2b"></b>ниже цели</span></span></div><div class="sla-meters">${meter('Первый ответ', a.sla_response_met_pct, `Среднее время первого ответа — ${frt}`)}${meter('Подготовка оценки', a.sla_estimate_met_pct, 'Оценка трудозатрат отправлена до срока')}${meter('Сдача работы', a.sla_delivery_met_pct, 'Заявка завершена до дедлайна')}</div></section><section class="panel"><div class="toolbar"><strong>Нагрузка и результаты команды</strong></div><div class="table-scroll"><table class="data-table"><thead><tr><th>Сотрудник</th><th class="num">В работе</th><th class="num">Закрыто</th><th class="num">Списано</th><th class="num">Отзывы</th></tr></thead><tbody>${staffRows || '<tr><td colspan="5" class="muted">Нет данных</td></tr>'}</tbody></table></div></section></div><div class="context-stack"><section class="panel content"><div class="card-head"><h2>Оценки клиентов</h2><span class="muted">${a.total_ratings} ${plural(a.total_ratings, ['отзыв', 'отзыва', 'отзывов'])}</span></div><div class="csat-bars">${csatBars}</div></section><section class="panel content"><h2>Заявки по типам</h2>${services.length ? `<div class="stack-bar">${serviceBar}</div><div class="service-list">${serviceRows}</div>` : '<p class="muted">Пока нет данных</p>'}</section>${feedback ? `<section class="activity-panel"><div class="activity-heading"><h2>Последние отзывы</h2><span>${(a.recent_feedback || []).length}</span></div>${feedback}</section>` : ''}</div></div>`;
+  shell('Аналитика и SLA', `<a class="button" href="/api/analytics/export.csv" download>${icon('download', 16)}Отчёт CSV</a>`, body, { kicker: 'Сроки, качество и нагрузка', lead: 'Сводка по соблюдению SLA, оценкам клиентов и работе команды' });
 }
 function renderGitLinksPanel(ticketId, staff) {
   const links = state.gitLinks || [];
@@ -830,14 +1745,19 @@ function attachGitLinkHandlers(ticketId) {
 }
 
 async function openKb() {
+  state.kbLoading = true;
+  state.kbReadingArticle = null;
+  state.kbEditingArticle = null;
   setView('kb');
   try {
     state.kbCategories = await api('/kb/categories');
     state.kbArticles = await api('/kb/articles' + (state.kbActiveCategory ? `?category_id=${state.kbActiveCategory}` : ''));
     state.kbReadingArticle = null;
     state.kbEditingArticle = null;
+    state.kbLoading = false;
     renderKb();
   } catch(e) {
+    state.kbLoading = false;
     showError(e);
   }
 }
@@ -862,6 +1782,10 @@ function renderKb() {
   if (state.kbReadingArticle) {
     return renderKbReader();
   }
+  if (state.kbLoading && !(state.kbArticles || []).length) {
+    shell('База знаний и регламенты', '', skeleton('cards'));
+    return;
+  }
 
   const allCount = (state.kbCategories || []).reduce((sum, c) => sum + (c.article_count || 0), 0);
   const chips = [
@@ -881,13 +1805,13 @@ function renderKb() {
     <article class="kb-card" data-read-article="${a.id}">
       <div class="kb-card-head">
         <span class="kb-cat-badge">${esc(a.category_name)}</span>
-        ${a.is_internal ? '<span class="kb-internal-badge">🔒 Только для команды</span>' : ''}
+        ${a.is_internal ? '<span class="kb-internal-badge">Только для команды</span>' : ''}
       </div>
       <h3 class="kb-card-title">${esc(a.title)}</h3>
       <p class="kb-card-snippet">${esc(a.snippet)}</p>
       <div class="kb-card-foot">
-        <span>👁️ ${a.views_count} просмотров</span>
-        <span>👍 ${a.helpful_yes} · 👎 ${a.helpful_no}</span>
+        <span>${a.views_count} ${plural(a.views_count,['просмотр','просмотра','просмотров'])}</span>
+        <span>Полезно: ${a.helpful_yes} · Нет: ${a.helpful_no}</span>
       </div>
     </article>
   `).join('');
@@ -934,13 +1858,13 @@ function renderKb() {
           <article class="kb-card" data-read-article="${a.id}">
             <div class="kb-card-head">
               <span class="kb-cat-badge">${esc(a.category_name)}</span>
-              ${a.is_internal ? '<span class="kb-internal-badge">🔒 Только для команды</span>' : ''}
+              ${a.is_internal ? '<span class="kb-internal-badge">Только для команды</span>' : ''}
             </div>
             <h3 class="kb-card-title">${esc(a.title)}</h3>
             <p class="kb-card-snippet">${esc(a.snippet)}</p>
             <div class="kb-card-foot">
-              <span>👁️ ${a.views_count} просмотров</span>
-              <span>👍 ${a.helpful_yes} · 👎 ${a.helpful_no}</span>
+              <span>${a.views_count} ${plural(a.views_count,['просмотр','просмотра','просмотров'])}</span>
+              <span>Полезно: ${a.helpful_yes} · Нет: ${a.helpful_no}</span>
             </div>
           </article>
         `).join('') || '<div class="empty"><strong>Статей не найдено</strong>Попробуйте изменить поисковый запрос.</div>';
@@ -962,15 +1886,15 @@ function renderKbReader() {
   const actions = `
     <div style="display:flex;gap:8px">
       <button class="button" id="kb-back-btn">← Все статьи</button>
-      ${staff ? `<button class="button" id="kb-edit-btn">Редактировать</button><button class="button" id="kb-delete-btn" style="color:#ef4444">Удалить</button>` : ''}
+      ${staff ? `<button class="button" id="kb-edit-btn">Редактировать</button><button class="button" id="kb-delete-btn" style="color:var(--late)">Удалить</button>` : ''}
     </div>
   `;
   const body = `
     <div class="kb-reader">
       <div style="margin-bottom:14px;display:flex;gap:8px;align-items:center">
         <span class="kb-cat-badge">${esc(a.category_name)}</span>
-        ${a.is_internal ? '<span class="kb-internal-badge">🔒 Внутренний регламент команды</span>' : ''}
-        <small class="muted" style="margin-left:auto">${date(a.updated_at)} · 👁️ ${a.views_count} просмотров</small>
+        ${a.is_internal ? '<span class="kb-internal-badge">Внутренний регламент команды</span>' : ''}
+        <small class="muted" style="margin-left:auto">${date(a.updated_at)} · ${a.views_count} ${plural(a.views_count,['просмотр','просмотра','просмотров'])}</small>
       </div>
       <section class="panel content">
         <h1 style="font-size:24px;font-weight:800;margin-bottom:16px">${esc(a.title)}</h1>
@@ -981,8 +1905,8 @@ function renderKbReader() {
             <div class="muted" style="font-size:12px;margin-top:2px">Ваша оценка помогает улучшать базу знаний</div>
           </div>
           <div class="kb-feedback-actions">
-            <button class="kb-feedback-btn" id="kb-vote-yes">👍 Да (${a.helpful_yes})</button>
-            <button class="kb-feedback-btn" id="kb-vote-no">👎 Нет (${a.helpful_no})</button>
+            <button class="kb-feedback-btn" id="kb-vote-yes">Да (${a.helpful_yes})</button>
+            <button class="kb-feedback-btn" id="kb-vote-no">Нет (${a.helpful_no})</button>
           </div>
         </div>
       </section>
@@ -1013,7 +1937,7 @@ function renderKbReader() {
         method: 'POST',
         body: JSON.stringify({ helpful })
       });
-      document.querySelector('#kb-feedback-box').innerHTML = `<span style="color:#059669;font-weight:700">✓ Спасибо за обратную связь!</span><div class="muted" style="font-size:12px">👍 ${res.helpful_yes} · 👎 ${res.helpful_no}</div>`;
+      document.querySelector('#kb-feedback-box').innerHTML = `<span style="color:var(--accent-ink);font-weight:700">✓ Спасибо за обратную связь!</span><div class="muted" style="font-size:12px">Полезно: ${res.helpful_yes} · Нет: ${res.helpful_no}</div>`;
     } catch(err) {
       showError(err);
     }
@@ -1044,7 +1968,7 @@ function renderKbEditor() {
           </label>
           <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600">
             <input type="checkbox" name="is_internal" ${a.is_internal ? 'checked' : ''}>
-            <span>🔒 Только для команды (скрыть от заказчиков)</span>
+            <span>Только для команды (скрыть от заказчиков)</span>
           </label>
           <div style="display:flex;gap:10px;margin-top:14px">
             <button class="button primary">Сохранить статью</button>
@@ -1089,9 +2013,11 @@ function renderKbEditor() {
 }
 
 async function openWebhooks() {
+  state.webhooksLoading = true;
   setView('webhooks');
   try {
     state.webhooks = await api('/webhooks');
+    state.webhooksLoading = false;
     renderWebhooks();
   } catch(err) {
     showError(err);
@@ -1100,6 +2026,7 @@ async function openWebhooks() {
 
 function renderWebhooks() {
   const list = state.webhooks || [];
+  if (state.webhooksLoading && !list.length) { shell('Вебхуки и интеграции', '', skeleton('list')); return; }
   const allEvents = [
     ['ticket.created', 'Создание заявки'],
     ['ticket.status_changed', 'Смена статуса заявки'],
@@ -1129,7 +2056,7 @@ function renderWebhooks() {
         <button class="button small-btn" data-wh-test="${w.id}">Тестовый запрос</button>
         <button class="button small-btn" data-wh-toggle="${w.id}">${w.is_active ? 'Приостановить' : 'Активировать'}</button>
         <button class="button small-btn" data-wh-logs="${w.id}">Журнал доставок</button>
-        <button class="button small-btn" data-wh-delete="${w.id}" style="color:#ef4444;margin-left:auto">Удалить</button>
+        <button class="button small-btn" data-wh-delete="${w.id}" style="color:var(--late);margin-left:auto">Удалить</button>
       </div>
       <div class="webhook-logs-drawer" id="wh-logs-${w.id}" style="display:none"></div>
     </div>
@@ -1259,7 +2186,7 @@ function renderWebhooks() {
         return;
       }
       drawer.style.display = 'block';
-      drawer.innerHTML = '<div class="muted">Загрузка журнала доставок...</div>';
+      drawer.innerHTML = skeletonLines(3);
       try {
         const logs = await api(`/webhooks/${id}/logs`);
         if (!logs.length) {
@@ -1281,7 +2208,7 @@ function renderWebhooks() {
           </div>
         `;
       } catch(err) {
-        drawer.innerHTML = `<div class="muted" style="color:#ef4444">Ошибка загрузки: ${esc(err.message)}</div>`;
+        drawer.innerHTML = `<div class="muted" style="color:var(--late)">Ошибка загрузки: ${esc(err.message)}</div>`;
       }
     };
   });
@@ -1295,8 +2222,9 @@ function formatRuDate(isoStr) {
 }
 
 async function openBilling() {
+  if (!billingOn()) { setView(state.user.role === 'customer' ? 'tickets' : 'tasks'); return; }
   setView('billing');
-  location.hash = '#billing';
+  syncRoute();
   try {
     state.billing = await api('/billing/overview');
     if (state.user.role !== 'customer') {
@@ -1309,318 +2237,108 @@ async function openBilling() {
 }
 
 function renderBilling() {
-  const staff = state.user.role !== 'customer';
+  const staff = state.user.role!=='customer';
+  const canManage=canManageFinance();
+  const employee = state.user.role==='employee'&&!state.user.is_manager;
+  if (!state.billing) { shell('Биллинг и счета', '', skeleton('billing')); return; }
   const b = state.billing || {};
+  const clients = staff ? (b.clients || state.billingClients || []) : [];
+  const rub = value => `${(value || 0).toLocaleString('ru-RU')} ₽`;
+  const kpi = (label, value, hint, cls = '') => `<div class="billing-kpi ${cls}"><span class="billing-kpi-label">${label}</span><strong class="billing-kpi-value">${value}</strong><span class="billing-kpi-hint">${hint}</span></div>`;
+  const allDocs = b.invoices || b.recent_documents || [];
+  const issuedDocs = allDocs.filter(d => d.status === 'issued' && d.doc_type === 'invoice');
+  let totalUnbilled = 0;
 
   let kpis = '';
   if (staff) {
-    const clients = b.clients || state.billingClients || [];
     const totalPaid = b.total_paid_rub ?? b.total_paid_rub_month ?? 0;
-    const totalUnbilled = b.total_unbilled_minutes ?? clients.reduce((acc, c) => acc + (c.unbilled_minutes || c.unbilled_done_minutes || 0), 0);
+    totalUnbilled = b.total_unbilled_minutes ?? clients.reduce((acc, c) => acc + (c.unbilled_minutes || c.unbilled_done_minutes || 0), 0);
     const totalClients = clients.length || b.total_clients || 0;
     const withDebt = clients.filter(c => (c.balance_minutes || 0) < 0).length || b.clients_with_debt || 0;
     const withDeposit = clients.filter(c => (c.balance_minutes || 0) > 0).length || b.clients_with_positive_balance || 0;
-
-    kpis = `
-      <div class="billing-kpi-grid">
-        <div class="billing-kpi positive">
-          <span class="billing-kpi-label">Поступило за месяц</span>
-          <strong class="billing-kpi-value">${totalPaid.toLocaleString('ru-RU')} ₽</strong>
-          <span class="billing-kpi-hint">Оплаченные счета клиентов</span>
-        </div>
-        <div class="billing-kpi">
-          <span class="billing-kpi-label">К закрытию в акты</span>
-          <strong class="billing-kpi-value">${hours(totalUnbilled)}</strong>
-          <span class="billing-kpi-hint">Выполненные задачи без акта</span>
-        </div>
-        <div class="billing-kpi">
-          <span class="billing-kpi-label">Клиенты на обслуживании</span>
-          <strong class="billing-kpi-value">${totalClients}</strong>
-          <span class="billing-kpi-hint">${withDeposit} с активным депозитом</span>
-        </div>
-        <div class="billing-kpi ${withDebt ? 'danger' : ''}">
-          <span class="billing-kpi-label">Задолженность часов</span>
-          <strong class="billing-kpi-value">${withDebt}</strong>
-          <span class="billing-kpi-hint">${withDebt ? 'Баланс ушёл в минус' : 'Все балансы в норме'}</span>
-        </div>
-      </div>
-    `;
+    const debtMinutes = clients.filter(c => (c.balance_minutes || 0) < 0).reduce((acc, c) => acc + c.balance_minutes, 0);
+    kpis = `<div class="billing-kpi-grid">${kpi('Поступило за месяц', rub(totalPaid), 'Оплаченные счета клиентов', 'positive')}${kpi('Готово к актированию', hours(totalUnbilled), 'Задачи и сопровождение без акта')}${kpi('Ожидают оплаты', rub(issuedDocs.reduce((acc, d) => acc + (d.total_rub || 0), 0)), `${issuedDocs.length} ${plural(issuedDocs.length, ['счёт', 'счёта', 'счетов'])} · ${totalClients} ${plural(totalClients, ['клиент', 'клиента', 'клиентов'])}, ${withDeposit} с депозитом`)}${kpi('Баланс в минусе', `${withDebt} ${plural(withDebt, ['клиент', 'клиента', 'клиентов'])}`, withDebt ? `Суммарно −${hours(Math.abs(debtMinutes))}` : 'Все балансы в норме', withDebt ? 'danger' : '')}</div>`;
   } else {
     const balMins = b.balance_minutes || 0;
     const balHours = b.balance_hours ?? (balMins / 60.0);
     const balRub = b.balance_rub ?? b.balance_rub_equiv ?? Math.round(balHours * (b.hourly_rate_rub || 3000));
     const activeMins = b.in_progress_minutes ?? b.active_billable_minutes ?? 0;
     const unbilledMins = b.unbilled_minutes ?? b.unbilled_done_minutes ?? 0;
-    const isPos = balMins > 0;
-    const isNeg = balMins < 0;
-
-    kpis = `
-      <div class="billing-kpi-grid">
-        <div class="billing-kpi ${isPos ? 'positive' : isNeg ? 'danger' : ''}">
-          <span class="billing-kpi-label">Баланс депозита</span>
-          <strong class="billing-kpi-value">${balHours.toLocaleString('ru-RU', {maximumFractionDigits: 1})} ч</strong>
-          <span class="billing-kpi-hint">Эквивалент: ${balRub.toLocaleString('ru-RU')} ₽</span>
-        </div>
-        <div class="billing-kpi">
-          <span class="billing-kpi-label">Тарифная ставка</span>
-          <strong class="billing-kpi-value">${(b.hourly_rate_rub || 3000).toLocaleString('ru-RU')} ₽/ч</strong>
-          <span class="billing-kpi-hint">Фиксированная ставка по договору</span>
-        </div>
-        <div class="billing-kpi">
-          <span class="billing-kpi-label">Часы в работе</span>
-          <strong class="billing-kpi-value">${hours(activeMins)}</strong>
-          <span class="billing-kpi-hint">Согласованные активные заявки</span>
-        </div>
-        <div class="billing-kpi">
-          <span class="billing-kpi-label">Готово к актированию</span>
-          <strong class="billing-kpi-value">${hours(unbilledMins)}</strong>
-          <span class="billing-kpi-hint">Выполненные задачи без акта</span>
-        </div>
-      </div>
-    `;
+    kpis = `<div class="billing-kpi-grid">${kpi('Баланс депозита', `${balHours.toLocaleString('ru-RU', { maximumFractionDigits: 1 })} ч`, `Эквивалент: ${rub(balRub)}`, balMins > 0 ? 'positive' : balMins < 0 ? 'danger' : '')}${kpi('Тарифная ставка', `${(b.hourly_rate_rub || 3000).toLocaleString('ru-RU')} ₽/ч`, 'Фиксированная ставка по договору')}${kpi('Часы в работе', hours(activeMins), 'Согласованные активные заявки')}${kpi('Готово к актированию', hours(unbilledMins), 'Задачи и сопровождение без акта')}</div>`;
   }
 
-  const actions = staff ? `
-    <div class="row" style="gap:8px; flex-wrap:wrap">
-      <button class="button primary" id="btn-create-act">+ Сформировать акт</button>
-      <button class="button" id="btn-create-invoice">+ Выставить счёт</button>
-      <button class="button" id="btn-create-deposit">+ Пополнить баланс</button>
-    </div>
-  ` : `
-    <div class="row" style="gap:8px">
-      <button class="button primary" id="btn-customer-deposit">+ Купить пакет часов</button>
-    </div>
-  `;
+  const actions = employee ? '' : staff
+    ? `<button class="button" id="btn-create-deposit">Пополнить баланс</button><button class="button" id="btn-create-invoice">Выставить счёт</button><button class="button primary" id="btn-create-act">${icon('plus', 16)}Сформировать акт</button>`
+    : `<button class="button primary" id="btn-customer-deposit">${icon('plus', 16)}Купить пакет часов</button>`;
 
   const activeTab = state.billingTab || 'docs';
-  const tabs = `
-    <div class="billing-tabs">
-      <button class="billing-tab ${activeTab === 'docs' ? 'active' : ''}" data-tab="docs">Документы (Счета и Акты)</button>
-      ${staff ? `<button class="billing-tab ${activeTab === 'clients' ? 'active' : ''}" data-tab="clients">Клиенты и тарифы (${(b.clients || state.billingClients)?.length || 0})</button>` : ''}
-      <button class="billing-tab ${activeTab === 'tx' ? 'active' : ''}" data-tab="tx">История операций</button>
-    </div>
-  `;
+  const tabButton = (key, label, count) => `<button class="billing-tab ${activeTab === key ? 'active' : ''}" data-tab="${key}" role="tab" aria-selected="${activeTab === key}">${label}${count !== undefined ? ` <i>${count}</i>` : ''}</button>`;
+  const tabs = `<div class="billing-tabs" role="tablist" aria-label="Разделы биллинга">${tabButton('docs', 'Счета и акты', allDocs.length)}${staff ? tabButton('clients', 'Клиенты и тарифы', clients.length) : ''}${staff ? tabButton('service', 'Сопровождение', (b.service_entries || []).length) : ''}${tabButton('tx', 'История операций')}</div>`;
 
   let content = '';
   if (activeTab === 'docs') {
-    let docs = b.invoices || b.recent_documents || [];
+    let docs = allDocs;
     const filter = state.billingFilter || 'all';
     if (filter === 'invoice') docs = docs.filter(d => d.doc_type === 'invoice');
     else if (filter === 'act') docs = docs.filter(d => d.doc_type === 'act');
-    else if (filter === 'issued') docs = docs.filter(d => d.status === 'issued');
-    else if (filter === 'paid') docs = docs.filter(d => d.status === 'paid');
-
-    const filterBar = `
-      <div class="billing-filter-bar">
-        <button class="billing-filter-pill ${filter === 'all' ? 'active' : ''}" data-filter="all">Все документы</button>
-        <button class="billing-filter-pill ${filter === 'invoice' ? 'active' : ''}" data-filter="invoice">Счета на оплату</button>
-        <button class="billing-filter-pill ${filter === 'act' ? 'active' : ''}" data-filter="act">Акты выполненных работ</button>
-        <button class="billing-filter-pill ${filter === 'issued' ? 'active' : ''}" data-filter="issued">Ожидают оплаты</button>
-        <button class="billing-filter-pill ${filter === 'paid' ? 'active' : ''}" data-filter="paid">Оплаченные</button>
-      </div>
-    `;
-
-    const statusPill = (st) => {
-      if (st === 'paid') return '<span class="billing-status paid">Оплачен ✓</span>';
-      if (st === 'issued') return '<span class="billing-status issued">Выставлен ⏳</span>';
-      return '<span class="billing-status cancelled">Аннулирован ✕</span>';
+    else if (filter === 'issued') docs = docs.filter(d => d.status === 'issued'&&d.doc_type==='invoice');
+    else if (filter === 'paid') docs = docs.filter(d => d.status === 'paid'||(d.signed_at&&d.status!=='cancelled'));
+    const pill = (key, label) => `<button class="billing-filter-pill ${filter === key ? 'active' : ''}" data-filter="${key}" aria-pressed="${filter === key}">${label}</button>`;
+    const filterBar = `<div class="billing-filter-bar">${pill('all', 'Все документы')}${pill('invoice', 'Счета')}${pill('act', 'Акты')}${pill('issued', 'Ожидают оплаты')}${pill('paid', 'Оплаченные / подписанные')}</div>`;
+    const statusPill = (doc) => {
+      if (doc.doc_type==='act'&&doc.signed_at&&doc.status!=='cancelled')return '<span class="billing-status paid">Подписан</span>';
+      if (doc.status === 'paid') return `<span class="billing-status paid">${doc.doc_type === 'act' ? 'Подписан' : 'Оплачен'}</span>`;
+      if (doc.status === 'issued') return `<span class="billing-status issued">${doc.doc_type === 'act' ? 'На подписании' : 'Ожидает оплаты'}</span>`;
+      return '<span class="billing-status cancelled">Аннулирован</span>';
     };
-
     const docRows = docs.map(d => {
-      const typeBadge = d.doc_type === 'act'
-        ? '<span class="billing-doc-pill act">Акт</span>'
-        : '<span class="billing-doc-pill invoice">Счёт</span>';
+      const typeBadge = d.doc_type === 'act' ? '<span class="billing-doc-pill act">Акт</span>' : '<span class="billing-doc-pill invoice">Счёт</span>';
       const clientName = d.organization_name || d.customer_name || d.client_name || 'Клиент';
-      const periodStr = d.period_start && d.period_end ? `<br><small class="muted">${formatRuDate(d.period_start)} – ${formatRuDate(d.period_end)}</small>` : '';
-
-      let actionButtons = `
-        <a href="/api/billing/invoices/${d.id}/print" target="_blank" class="billing-btn-sm" title="Печатная форма / PDF">
-          Печать ⎙
-        </a>
-      `;
-      if (staff && d.status === 'issued') {
-        actionButtons += `
-          <button class="billing-btn-sm primary" data-mark-paid="${d.id}" title="Отметить оплаченным">
-            Оплачен ✓
-          </button>
-          <button class="billing-btn-sm danger" data-mark-cancel="${d.id}" title="Аннулировать документ">
-            ✕
-          </button>
-        `;
-      }
-      if (!staff && d.status === 'issued' && d.doc_type === 'invoice') {
-        actionButtons += `
-          <button class="billing-btn-sm primary" data-customer-pay="${d.id}" title="Оплатить онлайн">
-            Оплатить онлайн (демо)
-          </button>
-        `;
-      }
-
-      return `
-        <tr>
-          <td>
-            <div style="display:flex; align-items:center; gap:8px">
-              ${typeBadge}
-              <strong>${esc(d.number)}</strong>
-            </div>
-          </td>
-          ${staff ? `<td><strong>${esc(clientName)}</strong></td>` : ''}
-          <td>${date(d.created_at)}</td>
-          <td>${hours(d.total_minutes)}${periodStr}</td>
-          <td><strong>${(d.total_rub || 0).toLocaleString('ru-RU')} ₽</strong></td>
-          <td>${statusPill(d.status)}</td>
-          <td>
-            <div style="display:flex; gap:6px; flex-wrap:wrap">
-              ${actionButtons}
-            </div>
-          </td>
-        </tr>
-      `;
+      const period = d.period_start && d.period_end ? `${formatRuDate(d.period_start)} – ${formatRuDate(d.period_end)}` : '';
+      let actionButtons = `<a href="/api/billing/invoices/${d.id}/print" target="_blank" rel="noopener" class="button small" aria-label="Печатная форма ${esc(d.number)}" title="Печатная форма / PDF">${icon('print', 15)}</a>`;
+      if (canManage && d.status === 'issued') actionButtons = `${d.doc_type==='act'?(d.signed_at?'':`<button class="button small" data-mark-signed="${d.id}">Подтвердить подписание</button>`):`<button class="button small" data-mark-paid="${d.id}">Подтвердить оплату</button>`}${actionButtons}<button class="button small danger" data-mark-cancel="${d.id}" aria-label="Аннулировать ${esc(d.number)}" title="Аннулировать документ">✕</button>`;
+      if (!staff && d.status === 'issued' && d.doc_type === 'invoice') actionButtons = `<span class="muted">Оплатите по реквизитам счёта. Менеджер подтвердит поступление.</span>${actionButtons}`;
+      return `<tr><td><div class="doc-cell">${typeBadge}<div><strong>№ ${esc(d.number)}</strong><small>${period ? 'за ' + period : 'от ' + formatRuDate(d.created_at)}</small></div></div></td>${staff ? `<td><strong>${esc(clientName)}</strong></td>` : ''}<td class="num">${hours(d.total_minutes)}</td><td class="num"><strong>${rub(d.total_rub)}</strong></td><td>${statusPill(d)}</td><td><div class="billing-actions">${actionButtons}</div></td></tr>`;
     }).join('');
-
-    content = `
-      <section class="panel content" style="padding: 20px">
-        ${filterBar}
-        ${docs.length ? `
-          <div style="overflow-x:auto">
-            <table class="billing-table">
-              <thead>
-                <tr>
-                  <th>№ и Тип</th>
-                  ${staff ? '<th>Клиент</th>' : ''}
-                  <th>Дата</th>
-                  <th>Объём / Период</th>
-                  <th>Сумма</th>
-                  <th>Статус</th>
-                  <th>Действия</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${docRows}
-              </tbody>
-            </table>
-          </div>
-        ` : '<div class="muted" style="text-align:center; padding: 40px 0">Документов по выбранному фильтру не найдено.</div>'}
-      </section>
-    `;
+    content = `${filterBar}${docs.length ? `<div class="table-scroll"><table class="billing-table"><thead><tr><th>Документ</th>${staff ? '<th>Клиент</th>' : ''}<th class="num">Объём</th><th class="num">Сумма</th><th>Статус</th><th><span class="visually-hidden">Действия</span></th></tr></thead><tbody>${docRows}</tbody></table></div>` : '<div class="empty"><strong>Документов нет</strong>По выбранному фильтру ничего не найдено.</div>'}`;
   } else if (activeTab === 'clients' && staff) {
-    const clients = state.billingClients || b.clients || [];
-    const clientRows = clients.map(c => `
-      <tr>
-        <td>
-          <strong>${esc(c.name)}</strong>
-          <div class="billing-client-meta">${c.client_type === 'org' || c.client_type === 'organization' ? 'Организация' : 'Физлицо / Прямой клиент'}</div>
-        </td>
-        <td>
-          <div>${c.inn ? `ИНН: ${esc(c.inn)}` : '<span class="muted">ИНН не указан</span>'}</div>
-          ${c.legal_address ? `<div class="billing-client-meta">${esc(c.legal_address)}</div>` : ''}
-        </td>
-        <td>
-          <strong>${(c.hourly_rate_rub || 3000).toLocaleString('ru-RU')} ₽/ч</strong>
-        </td>
-        <td>
-          <strong style="color: ${(c.balance_minutes || 0) < 0 ? '#ef4444' : 'var(--ink)'}">${(c.balance_hours ?? ((c.balance_minutes || 0) / 60)).toLocaleString('ru-RU', {maximumFractionDigits: 1})} ч</strong>
-          <div class="billing-client-meta">${(c.balance_rub ?? c.balance_rub_equiv ?? Math.round(((c.balance_minutes || 0) / 60) * (c.hourly_rate_rub || 3000))).toLocaleString('ru-RU')} ₽</div>
-        </td>
-        <td>
-          <strong>${hours(c.unbilled_minutes ?? c.unbilled_done_minutes ?? 0)}</strong>
-        </td>
-        <td>
-          <div style="display:flex; gap:6px; flex-wrap:wrap">
-            <button class="billing-btn-sm" data-edit-client="${c.client_type}:${c.client_id}">Реквизиты и тариф</button>
-            <button class="billing-btn-sm primary" data-act-client="${c.client_type}:${c.client_id}">+ Акт</button>
-            <button class="billing-btn-sm" data-deposit-client="${c.client_type}:${c.client_id}">+ Часы</button>
-          </div>
-        </td>
-      </tr>
-    `).join('');
-
-    content = `
-      <section class="panel content" style="padding: 20px">
-        <div style="overflow-x:auto">
-          <table class="billing-table">
-            <thead>
-              <tr>
-                <th>Клиент</th>
-                <th>Реквизиты</th>
-                <th>Ставка</th>
-                <th>Баланс депозита</th>
-                <th>К актированию</th>
-                <th>Управление</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${clientRows || '<tr><td colspan="6" class="muted" style="text-align:center; padding:30px">Нет зарегистрированных клиентов.</td></tr>'}
-            </tbody>
-          </table>
-        </div>
-      </section>
-    `;
-  } else if (activeTab === 'tx') {
+    const clientRows = clients.map(c => {
+      const balance = c.balance_minutes || 0;
+      return `<tr><td><strong>${esc(c.name)}</strong><div class="billing-client-meta">${c.client_type === 'org' || c.client_type === 'organization' ? 'Организация' : 'Физлицо / прямой клиент'}</div></td><td><div>${c.inn ? `ИНН: ${esc(c.inn)}` : '<span class="muted">ИНН не указан</span>'}</div>${c.legal_address ? `<div class="billing-client-meta">${esc(c.legal_address)}</div>` : ''}</td><td class="num"><strong>${(c.hourly_rate_rub || 3000).toLocaleString('ru-RU')} ₽/ч</strong></td><td class="num"><strong style="color:${balance < 0 ? 'var(--late)' : 'var(--ink)'}">${(c.balance_hours ?? (balance / 60)).toLocaleString('ru-RU', { maximumFractionDigits: 1 })} ч</strong><div class="billing-client-meta">${rub(c.balance_rub ?? c.balance_rub_equiv ?? Math.round((balance / 60) * (c.hourly_rate_rub || 3000)))}</div></td><td class="num"><strong>${hours(c.unbilled_minutes ?? c.unbilled_done_minutes ?? 0)}</strong></td><td><div class="billing-actions">${canManage?`<button class="button small" data-edit-client="${c.client_type}:${c.client_id}">Реквизиты</button><button class="button small" data-deposit-client="${c.client_type}:${c.client_id}">+ Часы</button><button class="button small primary" data-act-client="${c.client_type}:${c.client_id}">+ Акт</button>`:'Только просмотр'}</div></td></tr>`;
+    }).join('');
+    content = `<div class="table-scroll"><table class="billing-table"><thead><tr><th>Клиент</th><th>Реквизиты</th><th class="num">Ставка</th><th class="num">Депозит</th><th class="num">К актированию</th><th><span class="visually-hidden">Управление</span></th></tr></thead><tbody>${clientRows || '<tr><td colspan="6"><div class="empty"><strong>Клиентов пока нет</strong></div></td></tr>'}</tbody></table></div>`;
+  } else if (activeTab === 'service' && staff) {
+    const entries = b.service_entries || [];
+    const intro = 'Переписка, созвоны и встречи с клиентами. Клиент их не видит: в акте записи без акта сворачиваются в строку «Консультационное сопровождение и координация работ» по ставке клиента. Вносить время можно в общем чате клиента или в карточке заявки.';
+    content = `<div class="content"><p class="muted" style="margin-top:0">${intro}</p>${entries.length ? entries.map(e => serviceEntryItem(e, { showClient: true, canDelete: e.author_id === state.user.id || isDispatcher() })).join('') : '<div class="empty"><strong>Записей пока нет</strong>Время на коммуникацию появится здесь.</div>'}</div>`;
+  } else {
     const txs = b.transactions || b.recent_transactions || [];
     const txRows = txs.map(t => {
-      let badgeCls = 'deposit';
-      let badgeLabel = 'Пополнение';
-      if (t.tx_type === 'charge') {
-        badgeCls = 'charge';
-        badgeLabel = 'Списание';
-      } else if (t.tx_type === 'refund') {
-        badgeCls = 'refund';
-        badgeLabel = 'Возврат';
-      }
-
+      const kind = t.tx_type === 'charge' ? ['charge', 'Списание'] : t.tx_type === 'refund' ? ['refund', 'Возврат'] : ['deposit', 'Пополнение'];
       const clientName = t.organization_name || t.customer_name || t.client_name || 'Клиент';
-      const sign = t.minutes > 0 ? '+' : '';
-      const minColor = t.minutes > 0 ? '#15803d' : t.minutes < 0 ? '#b91c1c' : 'inherit';
-
-      return `
-        <tr>
-          <td>${date(t.created_at)}</td>
-          ${staff ? `<td><strong>${esc(clientName)}</strong></td>` : ''}
-          <td><span class="billing-tx-badge ${badgeCls}">${badgeLabel}</span></td>
-          <td><strong style="color:${minColor}">${sign}${hours(t.minutes)}</strong></td>
-          <td><strong>${(t.amount_rub || 0).toLocaleString('ru-RU')} ₽</strong></td>
-          <td>${esc(t.description || '—')}</td>
-          <td><small class="muted">${esc(t.created_by_name || 'Система')}</small></td>
-        </tr>
-      `;
+      return `<tr><td>${date(t.created_at)}</td>${staff ? `<td><strong>${esc(clientName)}</strong></td>` : ''}<td><span class="billing-tx-badge ${kind[0]}">${kind[1]}</span></td><td class="num"><strong style="color:${t.minutes > 0 ? 'var(--accent-ink)' : t.minutes < 0 ? 'var(--late)' : 'inherit'}">${t.minutes > 0 ? '+' : ''}${hours(t.minutes)}</strong></td><td class="num"><strong>${rub(t.amount_rub)}</strong></td><td>${esc(t.description || '—')}</td><td><small class="muted">${esc(t.created_by_name || 'Система')}</small></td></tr>`;
     }).join('');
-
-    content = `
-      <section class="panel content" style="padding: 20px">
-        ${txs.length ? `
-          <div style="overflow-x:auto">
-            <table class="billing-table">
-              <thead>
-                <tr>
-                  <th>Дата</th>
-                  ${staff ? '<th>Клиент</th>' : ''}
-                  <th>Операция</th>
-                  <th>Объём</th>
-                  <th>Сумма</th>
-                  <th>Основание</th>
-                  <th>Автор</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${txRows}
-              </tbody>
-            </table>
-          </div>
-        ` : '<div class="muted" style="text-align:center; padding: 40px 0">Операций по балансу пока не зафиксировано.</div>'}
-      </section>
-    `;
+    content = txs.length ? `<div class="table-scroll"><table class="billing-table"><thead><tr><th>Дата</th>${staff ? '<th>Клиент</th>' : ''}<th>Операция</th><th class="num">Объём</th><th class="num">Сумма</th><th>Основание</th><th>Автор</th></tr></thead><tbody>${txRows}</tbody></table></div>` : '<div class="empty"><strong>Операций пока нет</strong>Пополнения и списания часов появятся здесь.</div>';
   }
 
-  shell('Биллинг и счета', actions, `
-    <div style="max-width: 1200px">
-      ${kpis}
-      ${tabs}
-      ${content}
-    </div>
-    <div id="billing-modal-slot"></div>
-  `);
+  let side = '';
+  if (staff) {
+    const maxBalance = Math.max(1, ...clients.map(c => Math.abs(c.balance_minutes || 0)));
+    const balanceRows = clients.slice().sort((x, y) => (y.balance_minutes || 0) - (x.balance_minutes || 0)).map(c => {
+      const m = c.balance_minutes || 0;
+      const width = Math.abs(m) / maxBalance * 100;
+      return `<div class="balance-row"><span title="${esc(c.name)}">${esc(c.name)}</span><strong class="${m < 0 ? 'neg' : m > 0 ? 'pos' : ''}">${m > 0 ? '+' : m < 0 ? '−' : ''}${hours(Math.abs(m))}</strong><div class="balance-track" aria-hidden="true"><div>${m < 0 ? `<i class="neg" style="width:${width}%"></i>` : ''}</div><div>${m > 0 ? `<i class="pos" style="width:${width}%"></i>` : ''}</div></div></div>`;
+    }).join('');
+    side = `<div class="context-stack"><section class="panel content"><div class="card-head"><h2>Балансы клиентов</h2><span class="muted">часы депозита</span></div>${balanceRows || '<p class="muted">Клиентов пока нет.</p>'}</section>${canManage&&totalUnbilled > 0 ? `<section class="focus-panel"><span class="focus-overline">Пора закрыть период</span><h2>${hours(totalUnbilled)} выполнено без акта</h2><p>Сформируйте акт, чтобы списать часы с депозита клиента.</p><div class="focus-actions"><button class="button on-dark" id="btn-close-period">Сформировать акт</button></div></section>` : ''}</div>`;
+  }
 
+  const month = new Date().toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' });
+  shell('Баланс и документы', actions, `${kpis}<div class="${staff ? 'split billing-split' : ''}"><section class="panel">${tabs}${content}</section>${side}</div><div id="billing-modal-slot"></div>`, { kicker: month.charAt(0).toUpperCase() + month.slice(1) });
+
+  document.querySelectorAll('.billing-table').forEach(table => {
+    const labels=[...table.querySelectorAll('thead th')].map(th=>th.textContent.trim());
+    table.querySelectorAll('tbody tr').forEach(row=>[...row.children].forEach((cell,i)=>cell.dataset.label=labels[i]||''));
+  });
   attachBillingHandlers();
 }
 
@@ -1639,8 +2357,10 @@ function attachBillingHandlers() {
     };
   });
 
+  document.querySelectorAll('[data-mark-signed]').forEach(button=>button.onclick=async()=>{if(!confirm('Отметить, что акт подписан сторонами?'))return;try{await api(`/billing/invoices/${button.dataset.markSigned}/status`,{method:'PATCH',body:JSON.stringify({status:'signed'})});await openBilling();}catch(error){showError(error);}});
   document.querySelectorAll('[data-mark-paid]').forEach(btn => {
     btn.onclick = async () => {
+      if(!confirm('Подтвердить фактическое поступление денег по этому счёту? Часы будут зачислены клиенту.'))return;
       const id = Number(btn.dataset.markPaid);
       try {
         await api(`/billing/invoices/${id}/status`, {
@@ -1670,24 +2390,11 @@ function attachBillingHandlers() {
     };
   });
 
-  document.querySelectorAll('[data-customer-pay]').forEach(btn => {
-    btn.onclick = async () => {
-      const id = Number(btn.dataset.customerPay);
-      if (!confirm('Подтвердить оплату счёта онлайн (демо)? Депозит часов будет сразу зачислен на ваш баланс.')) return;
-      try {
-        await api(`/billing/invoices/${id}/status`, {
-          method: 'PATCH',
-          body: JSON.stringify({ status: 'paid' })
-        });
-        alert('Оплата успешно подтверждена! Часы зачислены на ваш баланс.');
-        await openBilling();
-      } catch(err) {
-        showError(err);
-      }
-    };
-  });
 
+
+  bindServiceDelete(openBilling);
   document.querySelector('#btn-create-act')?.addEventListener('click', () => openActModal());
+  document.querySelector('#btn-close-period')?.addEventListener('click', () => openActModal());
   document.querySelector('#btn-create-invoice')?.addEventListener('click', () => openInvoiceModal());
   document.querySelector('#btn-create-deposit')?.addEventListener('click', () => openDepositModal());
   document.querySelector('#btn-customer-deposit')?.addEventListener('click', () => openCustomerInvoiceModal());
@@ -1732,9 +2439,9 @@ async function openActModal(preselectedKey = '') {
               `).join('')}
             </select>
           </label>
-          <div style="font-weight:700; margin-top:8px; font-size:13px">Завершённые заявки для включения в акт:</div>
+          <div style="font-weight:700; margin-top:8px; font-size:13px">Заявки и сопровождение для включения в акт:</div>
           <div id="act-tickets-box" class="billing-ticket-list">
-            <div class="muted">Выберите клиента для отображения не выставленных заявок</div>
+            <div class="muted">Выберите клиента для отображения заявок и сопровождения без акта</div>
           </div>
           <div class="row">
             <label style="flex:1">Период с
@@ -1766,6 +2473,7 @@ async function openActModal(preselectedKey = '') {
   const submitBtn = slot.querySelector('#act-submit-btn');
 
   let currentTickets = [];
+  let currentServices = [];
 
   async function loadTickets(key) {
     if (!key) {
@@ -1774,11 +2482,14 @@ async function openActModal(preselectedKey = '') {
       return;
     }
     const [cType, cId] = key.split(':');
-    ticketsBox.innerHTML = '<div class="muted">Загрузка заявок...</div>';
+    ticketsBox.innerHTML = skeletonLines(3);
     try {
-      currentTickets = await api(`/billing/unbilled-tickets?client_type=${cType}&client_id=${cId}`);
-      if (!currentTickets.length) {
-        ticketsBox.innerHTML = '<div class="muted">У этого клиента нет завершённых не выставленных в акт заявок.</div>';
+      [currentTickets, currentServices] = await Promise.all([
+        api(`/billing/unbilled-tickets?client_type=${cType}&client_id=${cId}`),
+        api(`/service-entries?client_type=${cType}&client_id=${cId}&unbilled=true`)
+      ]);
+      if (!currentTickets.length && !currentServices.length) {
+        ticketsBox.innerHTML = '<div class="muted">У этого клиента нет завершённых заявок и часов сопровождения без акта.</div>';
         submitBtn.disabled = true;
         recalc();
         return;
@@ -1786,8 +2497,16 @@ async function openActModal(preselectedKey = '') {
       ticketsBox.innerHTML = `
         <div style="padding-bottom:6px; margin-bottom:6px; border-bottom:1px solid var(--line); display:flex; justify-content:space-between">
           <label style="font-weight:700; cursor:pointer"><input type="checkbox" id="act-select-all" checked> Выбрать все</label>
-          <small class="muted">${currentTickets.length} заявок</small>
+          <small class="muted">${currentTickets.length} ${plural(currentTickets.length, ['заявка', 'заявки', 'заявок'])}${currentServices.length ? ` · ${currentServices.length} ${plural(currentServices.length, ['запись', 'записи', 'записей'])} сопровождения` : ''}</small>
         </div>
+        ${currentServices.map(s => `
+            <div class="billing-ticket-item">
+              <input type="checkbox" class="act-service-cb" value="${s.id}" data-mins="${s.minutes}" checked id="act-sv-${s.id}">
+              <label for="act-sv-${s.id}">
+                <span><strong>${esc(serviceKindNames[s.kind] || s.kind)}</strong> ${date(s.occurred_at)}: ${esc(s.note)}</span>
+                <strong>${hours(s.minutes)}</strong>
+              </label>
+            </div>`).join('')}
         ${currentTickets.map(t => {
           const mins = t.actual_minutes || t.approved_minutes || 0;
           return `
@@ -1802,15 +2521,15 @@ async function openActModal(preselectedKey = '') {
         }).join('')}
       `;
       slot.querySelector('#act-select-all').onchange = (e) => {
-        slot.querySelectorAll('.act-ticket-cb').forEach(cb => { cb.checked = e.target.checked; });
+        slot.querySelectorAll('.act-ticket-cb,.act-service-cb').forEach(cb => { cb.checked = e.target.checked; });
         recalc();
       };
-      slot.querySelectorAll('.act-ticket-cb').forEach(cb => {
+      slot.querySelectorAll('.act-ticket-cb,.act-service-cb').forEach(cb => {
         cb.onchange = () => recalc();
       });
       recalc();
     } catch(err) {
-      ticketsBox.innerHTML = `<div class="muted" style="color:#ef4444">Ошибка: ${esc(err.message)}</div>`;
+      ticketsBox.innerHTML = `<div class="muted" style="color:var(--late)">Ошибка: ${esc(err.message)}</div>`;
     }
   }
 
@@ -1820,11 +2539,12 @@ async function openActModal(preselectedKey = '') {
     const [cType, cId] = key.split(':');
     const client = clients.find(x => x.client_type === cType && x.client_id === Number(cId));
     const rate = client ? client.hourly_rate_rub : 3000;
-    const checked = Array.from(slot.querySelectorAll('.act-ticket-cb:checked'));
+    const checked = Array.from(slot.querySelectorAll('.act-ticket-cb:checked,.act-service-cb:checked'));
+    const checkedTickets = slot.querySelectorAll('.act-ticket-cb:checked').length;
     let totalMins = 0;
     checked.forEach(cb => { totalMins += Number(cb.dataset.mins || 0); });
     const rub = Math.round(totalMins / 60 * rate);
-    totalsBar.innerHTML = `Выбрано заявок: <strong>${checked.length}</strong> | Трудозатраты: <strong>${hours(totalMins)}</strong> | Сумма к списанию: <strong>${rub.toLocaleString('ru-RU')} ₽</strong>`;
+    totalsBar.innerHTML = `Выбрано заявок: <strong>${checkedTickets}</strong>, сопровождение: <strong>${checked.length - checkedTickets}</strong> | Трудозатраты: <strong>${hours(totalMins)}</strong> | Сумма к списанию: <strong>${rub.toLocaleString('ru-RU')} ₽</strong>`;
     submitBtn.disabled = checked.length === 0;
   }
 
@@ -1837,6 +2557,7 @@ async function openActModal(preselectedKey = '') {
     const form = new FormData(e.target);
     const [client_type, client_id_str] = form.get('client_key').split(':');
     const ticket_ids = Array.from(slot.querySelectorAll('.act-ticket-cb:checked')).map(cb => Number(cb.value));
+    const service_entry_ids = Array.from(slot.querySelectorAll('.act-service-cb:checked')).map(cb => Number(cb.value));
     try {
       const doc = await api('/billing/invoices', {
         method: 'POST',
@@ -1847,7 +2568,8 @@ async function openActModal(preselectedKey = '') {
           period_start: form.get('period_start') || null,
           period_end: form.get('period_end') || null,
           notes: form.get('notes') || '',
-          ticket_ids
+          ticket_ids,
+          service_entry_ids
         })
       });
       slot.innerHTML = '';
@@ -2164,30 +2886,72 @@ function openCustomerInvoiceModal() {
 }
 
 async function openHash(){
-  if(!state.user)return;
-  const match=location.hash.match(/^#(ticket|chat)\/(\d+)$/);
-  if(match)return match[1]==='ticket'?openTicket(Number(match[2])):openChat(Number(match[2]));
-  if(location.hash==='#messengers')return openMessengers();
-  if(location.hash==='#analytics')return openAnalytics();
-  if(location.hash==='#kb')return openKb();
-  if(location.hash==='#webhooks')return openWebhooks();
-  if(location.hash==='#billing')return openBilling();
+  if(!state.user||state.user.must_change_credentials)return;
+  state.restoringRoute=true;
+  try{
+    const route=location.hash.slice(1);const taskMatch=route.match(/^task\/(\d+)$/);if(taskMatch){if(state.user.role==='customer')return setView('tickets');return await TasksUI.open(Number(taskMatch[1]));}const match=route.match(/^(ticket|chat)\/(\d+)$/);
+    if(match)return await (match[1]==='ticket'?openTicket(Number(match[2])):openChat(Number(match[2])));
+    const loaders={messengers:openMessengers,analytics:openAnalytics,kb:openKb,webhooks:openWebhooks,billing:openBilling};
+    if(route==='webhooks'&&state.user.role!=='admin')return setView('tickets');
+    if(route==='analytics'&&!isDispatcher())return setView('tickets');
+    if(loaders[route])return await loaders[route]();
+    const views=['tasks','tickets','queue','organizations','team','profile','new','notifications','chats'];
+    if(views.includes(route)&&!(['team','tasks'].includes(route)&&state.user.role==='customer')&&!(route==='queue'&&state.user.role==='customer'))setView(route);
+    else setView(state.user.role==='customer'?'tickets':'tasks');
+  }catch(error){showError(error);}finally{state.restoringRoute=false;}
 }
-function render() {if(!state.user)return renderAuth();if(state.view==='organizations')return renderOrganizations();if(state.view==='profile')return renderProfile();if(state.view==='messengers')return renderMessengers();if(state.view==='queue')return renderQueue();if(state.view==='new')return renderNew();if(state.view==='detail'&&state.current)return renderDetail();if(state.view==='team')return renderTeam();if(state.view==='notifications')return renderNotifications();if(state.view==='chats')return renderChats();if(state.view==='chat'&&state.currentChat)return renderChatDetail();if(state.view==='analytics')return renderAnalytics();if(state.view==='kb')return renderKb();if(state.view==='webhooks')return renderWebhooks();if(state.view==='billing')return renderBilling();renderTickets();}
+
+function render() {syncRoute();if(!state.user)return renderAuth();if(state.user.must_change_credentials)return renderCredentials();if(state.view==='organizations')return renderOrganizations();if(state.view==='profile')return renderProfile();if(state.view==='messengers')return renderMessengers();if(state.view==='queue')return renderQueue();if(state.view==='new')return renderNew();if(state.view==='detail'&&state.current)return renderDetail();if(state.view==='tasks')return TasksUI.render();if(state.view==='task')return TasksUI.renderDetail();if(state.view==='team')return renderTeam();if(state.view==='notifications')return renderNotifications();if(state.view==='chats')return renderChats();if(state.view==='chat'&&state.currentChat)return renderChatDetail();if(state.view==='analytics')return renderAnalytics();if(state.view==='kb')return renderKb();if(state.view==='webhooks')return renderWebhooks();if(state.view==='billing')return renderBilling();renderTickets();}
 async function start(){
+  const params=new URLSearchParams(location.search);
+  if(params.has('invite')||params.has('reset')){renderAuth();return;}
+  if(params.has('register'))state.authMode='register';
+  if(params.has('register')||params.has('login'))history.replaceState(null,'',location.pathname+location.hash);
   if('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(()=>{});
   try{
     state.user=await api('/me');
-    state.view=state.user.role==='customer'?'tickets':'queue';
+    state.view=state.user.role==='customer'?'tickets':'tasks';
+    if(state.user.must_change_credentials){renderCredentials();return;}
     initRealtime();
+    state.restoringRoute=true;
     await refresh();
     await openHash();
-  }catch{
-    state.user=null;
-    renderAuth();
+    maybeStartTour();
+    syncPush();
+  }catch(error){
+    if(error.status===401){state.user=null;renderAuth();}
+    else if(state.user){render();showError(error);}
+    else {app.innerHTML='<main class="auth-main"><section class="auth-card"><h1>Не удалось загрузить кабинет</h1><p>Проверьте соединение и повторите попытку.</p><button class="button primary" id="retry-start">Повторить</button></section></main>';document.querySelector('#retry-start').onclick=start;}
   }
 }
-window.addEventListener('hashchange',()=>openHash());
+let routeTimer;const restoreRoute=()=>{clearTimeout(routeTimer);routeTimer=setTimeout(()=>openHash(),0);};
+window.addEventListener('hashchange',restoreRoute);
+window.addEventListener('popstate',restoreRoute);
+document.addEventListener('visibilitychange',()=>{
+  if(document.visibilityState!=='visible'||!state.user)return;
+  if(state.view==='detail'&&state.current)markRead('ticket',state.current.ticket.id,state.current.messages);
+  if(state.view==='chat'&&state.currentChat)markRead('chat',state.currentChat.chat.id,state.currentChat.messages);
+  if(state.user.role==='customer')api('/waiting-on-me').then(w=>{state.waiting=w;}).catch(()=>{});
+});
+themeMedia.addEventListener?.('change',syncThemeUi);
+window.addEventListener('dragover',e=>{if([...(e.dataTransfer?.types||[])].includes('Files'))e.preventDefault();});
+window.addEventListener('drop',e=>{if([...(e.dataTransfer?.types||[])].includes('Files'))e.preventDefault();});
+navigator.serviceWorker?.addEventListener('message',e=>{if(e.data?.type!=='open-url')return;const target=new URL(e.data.url,location.origin);if(location.hash===target.hash)openHash();else location.hash=target.hash;});
+document.addEventListener('keydown',e=>{
+  if(e.defaultPrevented||e.ctrlKey||e.metaKey||e.altKey||!['KeyJ','KeyK'].includes(e.code)||!state.user)return;
+  if(e.target.closest?.('input, textarea, select, [contenteditable="true"]')||document.querySelector('.palette-backdrop, .tour-layer, .billing-modal-backdrop'))return;
+  const rows=[...document.querySelectorAll('#main .qrow, #main .trow, #main .chat-item:not([hidden]), #main .notification-row')];
+  if(!rows.length)return;
+  e.preventDefault();
+  const current=rows.indexOf(document.activeElement);
+  const next=current<0?0:Math.min(rows.length-1,Math.max(0,current+(e.code==='KeyJ'?1:-1)));
+  rows[next].focus({preventScroll:true});
+  rows[next].scrollIntoView({block:'nearest',behavior:reduceMotion()?'auto':'smooth'});
+});
+document.addEventListener('keydown',e=>{
+  if((e.ctrlKey||e.metaKey)&&e.code==='KeyK'&&state.user){e.preventDefault();openPalette();return;}
+  if(e.key==='Escape'){document.body.classList.remove('nav-open');const slot=document.querySelector('#billing-modal-slot');if(slot?.firstElementChild)slot.innerHTML='';}
+});
 start();
 setInterval(()=>loadNotifications().catch(()=>{}),15000);
 setInterval(async()=>{
@@ -2198,3 +2962,7 @@ setInterval(async()=>{
   }catch{}
 },15000);
 
+
+window.addEventListener('resize',()=>{const menu=document.querySelector('#sidebar');if(menu)menu.inert=window.matchMedia('(max-width:1100px)').matches&&!document.body.classList.contains('nav-open');});
+document.addEventListener('pointerdown',e=>{if(!e.target.closest('.nav-cluster'))document.querySelectorAll('.nav-cluster[open]').forEach(menu=>menu.open=false);});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){document.querySelectorAll('.nav-cluster[open]').forEach(menu=>menu.open=false);if(document.body.classList.contains('nav-open'))document.querySelector('[data-nav-close]')?.click();}});

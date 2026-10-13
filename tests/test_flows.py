@@ -11,12 +11,15 @@ from PIL import Image
 
 temp = tempfile.TemporaryDirectory()
 os.environ["APP_DB"] = str(Path(temp.name) / "test.db")
+os.environ["BILLING_ENABLED"] = "1"
 import app as service
 
 
 class Flows(unittest.TestCase):
     def setUp(self):
         with service.db() as conn:
+            conn.execute("DELETE FROM ticket_templates")
+            conn.execute("DELETE FROM service_entries")
             conn.execute("DELETE FROM billing_transactions")
             conn.execute("DELETE FROM ticket_git_links")
             conn.execute("DELETE FROM attachments")
@@ -48,19 +51,44 @@ class Flows(unittest.TestCase):
         self.staff = self.admin.post("/api/staff", json={"name":"Worker","email":"w@example.com","password":"password123"}).json()
         self.assertEqual(self.employee.post("/api/login", json={"email":"w@example.com","password":"password123"}).status_code, 200)
 
-    def test_landing_and_demo_request(self):
-        guest = TestClient(service.app)
-        page = guest.get("/landing")
-        self.assertEqual(page.status_code, 200)
-        self.assertIn("Codari", page.text)
-        self.assertEqual(guest.get("/landing.js").status_code, 200)
-        payload = {"name": "Ирина", "company": "Студия", "contact": "@irina", "team_size": "6–20", "consent": True}
-        self.assertEqual(guest.post("/api/demo-requests", json=payload).status_code, 200)
-        self.assertEqual(guest.post("/api/demo-requests", json={**payload, "consent": False}).status_code, 400)
-        self.assertEqual(guest.post("/api/demo-requests", json={**payload, "contact": ""}).status_code, 422)
+    def test_manual_company_owner_temporary_credentials(self):
+        payload = {"name": "Manual Owner", "company_name": "Manual Company"}
+        for client in (self.customer, self.employee, TestClient(service.app)):
+            self.assertIn(client.post("/api/company-owners", json=payload).status_code, (401, 403))
+        response = self.admin.post("/api/company-owners", json=payload)
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.headers["cache-control"], "no-store")
+        access = response.json()
+        owner = TestClient(service.app)
+        login = {"email": access["login"], "password": access["temporary_password"]}
+        self.assertTrue(owner.post("/api/login", json=login).json()["must_change_credentials"])
+        self.assertTrue(owner.get("/api/me").json()["must_change_credentials"])
+        self.assertEqual(owner.get("/api/tickets").status_code, 403)
+        stale = TestClient(service.app)
+        stale.post("/api/login", json=login)
+        credentials = {"email": "permanent@example.com", "password": "NewPassword123!",
+                       "current_password": access["temporary_password"]}
+        self.assertEqual(owner.post("/api/account/credentials", json={**credentials, "email": "c@example.com"}).status_code, 409)
+        self.assertEqual(owner.post("/api/account/credentials", json={**credentials, "current_password": "wrongpassword"}).status_code, 403)
+        self.assertEqual(owner.post("/api/account/credentials", json={**credentials, "password": access["temporary_password"]}).status_code, 422)
+        self.assertEqual(owner.post("/api/account/credentials", json={**credentials, "email": access["login"]}).status_code, 422)
+        result = owner.post("/api/account/credentials", json=credentials)
+        self.assertEqual(result.status_code, 200)
+        self.assertFalse(result.json()["must_change_credentials"])
+        self.assertEqual(stale.get("/api/me").status_code, 401)
+        self.assertEqual(owner.get("/api/tickets").status_code, 200)
+        company = owner.get("/api/organizations").json()[0]
+        self.assertEqual(company["id"], access["organization_id"])
+        self.assertEqual(company["members"][0]["role"], "owner")
+        self.assertEqual(owner.post("/api/login", json=login).status_code, 401)
+        self.assertEqual(owner.post("/api/login", json={"email": credentials["email"], "password": credentials["password"]}).status_code, 200)
+        second = self.admin.post("/api/company-owners", json={"name": "Second Owner", "organization_id": company["id"]})
+        self.assertEqual(second.status_code, 201)
         with service.db() as conn:
-            row = conn.execute("SELECT name, contact, team_size FROM demo_requests ORDER BY id DESC").fetchone()
-        self.assertEqual(tuple(row), ("Ирина", "@irina", "6–20"))
+            conn.execute("UPDATE users SET temporary_credentials_expires_at='2000-01-01' WHERE id=?", (second.json()["id"],))
+        self.assertEqual(TestClient(service.app).post("/api/login", json={"email":second.json()["login"], "password":second.json()["temporary_password"]}).status_code, 401)
+        self.assertEqual(self.admin.post("/api/company-owners", json={"name":"Missing Owner","organization_id":999999}).status_code, 404)
+        self.assertEqual(self.admin.post("/api/company-owners", json={"name":"  ","company_name":"  "}).status_code, 422)
 
     def test_staff_profile_avatar_and_customer_visibility(self):
         self.assertEqual(self.customer.get("/api/profile/me").status_code, 403)
@@ -81,10 +109,10 @@ class Flows(unittest.TestCase):
         ticket_id = self.customer.post("/api/tickets", json={"title":"Нужна помощь","description":"Подключить систему"}).json()["id"]
         self.admin.patch(f"/api/tickets/{ticket_id}/assignee", json={"assignee_id":self.staff["id"]})
         profile = self.customer.get(f"/api/staff/{self.staff['id']}/profile")
-        self.assertEqual(profile.status_code, 200)
-        self.assertEqual(profile.json()["job_title"], "Ведущий инженер")
-        self.assertNotIn("email", profile.json())
-        image = self.customer.get(f"/api/staff/{self.staff['id']}/avatar")
+        self.assertEqual(profile.status_code, 404)
+        self.assertEqual(self.admin.get(f"/api/staff/{self.staff['id']}/profile").json()["job_title"], "Ведущий инженер")
+        self.assertEqual(self.customer.get(f"/api/staff/{self.staff['id']}/avatar").status_code, 404)
+        image = self.admin.get(f"/api/staff/{self.staff['id']}/avatar")
         self.assertEqual(image.status_code, 200)
         self.assertEqual(image.headers["content-type"], "image/webp")
         self.assertLess(Image.open(BytesIO(image.content)).width, 513)
@@ -112,6 +140,25 @@ class Flows(unittest.TestCase):
         self.assertEqual(detail["customer_name"], "Александр Волков")
         self.assertNotIn("phone", detail)
         self.assertEqual(self.other.get(f"/api/tickets/{ticket['id']}").status_code, 404)
+
+    def test_new_and_custom_ticket_service_types(self):
+        for service_type in ("development", "new_development", "maintenance", "other", "custom:Аудит системы", "custom:<Аудит & проверка>"):
+            with self.subTest(service_type=service_type):
+                payload = {"title": "Проверка типа задачи", "description": "Описание тестовой задачи", "service_type": service_type}
+                created = self.customer.post("/api/tickets", json=payload)
+                self.assertEqual(created.status_code, 201, created.text)
+                detail = self.customer.get(f"/api/tickets/{created.json()['id']}").json()
+                self.assertEqual(detail["ticket"]["service_type"], service_type)
+                template = self.admin.post("/api/ticket-templates", json={**payload, "name": "Тестовый шаблон"})
+                self.assertEqual(template.status_code, 201, template.text)
+                self.assertEqual(template.json()["service_type"], service_type)
+
+    def test_custom_ticket_service_type_validation(self):
+        for service_type in ("unknown", "custom:", "custom:   ", "custom:А\nБ", "custom:" + "А" * 81):
+            with self.subTest(service_type=service_type):
+                payload = {"title": "Проверка типа задачи", "description": "Описание тестовой задачи", "service_type": service_type}
+                self.assertEqual(self.customer.post("/api/tickets", json=payload).status_code, 422)
+                self.assertEqual(self.admin.post("/api/ticket-templates", json={**payload, "name": "Тестовый шаблон"}).status_code, 422)
 
     def test_ticket_conversation_and_access(self):
         created = self.customer.post("/api/tickets", json={"title":"Тестовая задача","description":"Нужна помощь с услугой"})
@@ -143,8 +190,9 @@ class Flows(unittest.TestCase):
         self.assertEqual(self.employee.post(f"/api/tickets/{ticket_id}/messages", json={"body":"Взяли в работу","request_id":"employee-1"}).status_code, 201)
         detail = self.customer.get(f"/api/tickets/{ticket_id}").json()
         self.assertEqual(len(detail["messages"]), 2)
-        self.assertEqual(len(detail["events"]), 2)
-        self.assertEqual(detail["ticket"]["assignee_name"], "Worker")
+        self.assertEqual(len(detail["events"]), 1)
+        self.assertNotIn("assignee_name", detail["ticket"])
+        self.assertEqual(self.employee.get(f"/api/tickets/{ticket_id}").json()["ticket"]["assignee_name"], "Worker")
         self.assertEqual(detail["estimates"][0]["state"], "approved")
         self.assertEqual(len(self.other.get("/api/tickets").json()), 0)
         customer_notifications = self.customer.get("/api/notifications").json()
@@ -252,7 +300,7 @@ class Flows(unittest.TestCase):
         self.assertTrue(all(x["next_action"] == "Назначить ответственного" for x in queue.json()))
         self.assertEqual(self.customer.get("/api/work-queue").status_code, 403)
         self.admin.patch(f"/api/tickets/{ticket_id}/assignee", json={"assignee_id":self.staff["id"]})
-        self.assertEqual(self.customer.get(f"/api/tickets/{ticket_id}").json()["ticket"]["next_step"], "Сотрудник готовит оценку")
+        self.assertEqual(self.customer.get(f"/api/tickets/{ticket_id}").json()["ticket"]["next_step"], "Готовим оценку")
         self.employee.post(f"/api/tickets/{ticket_id}/estimates",
                            json={"effort_minutes":120,"assessment_minutes":20})
         self.assertEqual(self.customer.get(f"/api/tickets/{ticket_id}").json()["ticket"]["next_step"], "Одобрите оценку трудозатрат")
@@ -444,13 +492,180 @@ class Flows(unittest.TestCase):
         }).json()
         self.assertTrue(inv["number"].startswith("СЧ-"))
 
-        # Customer pays invoice online
+        # The customer cannot credit their own balance; the manager confirms receipt.
         pay = self.customer.patch(f"/api/billing/invoices/{inv['id']}/status", json={"status": "paid"})
+        self.assertEqual(pay.status_code, 403)
+        pay = self.admin.patch(f"/api/billing/invoices/{inv['id']}/status", json={"status": "paid"})
         self.assertEqual(pay.status_code, 200)
 
         # Balance credited: 480 + 600 = 1080
         final_overview = self.customer.get("/api/billing/overview").json()
         self.assertEqual(final_overview["balance_minutes"], 1080)
+
+    def test_service_hours_go_to_act(self):
+        cust_id = self.customer.get("/api/me").json()["id"]
+        other_id = self.other.get("/api/me").json()["id"]
+        chat_id = self.customer.post("/api/chats").json()["id"]
+        entry = {"customer_id": cust_id, "kind": "call", "minutes": 45, "note": "Созвон по срокам релиза",
+                 "request_id": "service-call-1"}
+        self.assertEqual(self.customer.post("/api/service-entries", json=entry).status_code, 403)
+        call = self.employee.post("/api/service-entries", json=entry)
+        self.assertEqual(call.status_code, 201)
+        self.assertEqual(self.employee.post("/api/service-entries", json=entry).json()["id"], call.json()["id"])
+        chat = self.employee.post("/api/service-entries", json={"customer_id": cust_id, "kind": "chat", "minutes": 30,
+                                                                 "note": "Консультация в чате"}).json()
+        foreign = self.customer.post("/api/tickets", json={"title":"Чужая заявка","description":"Описание"}).json()["id"]
+        self.assertEqual(self.employee.post("/api/service-entries", json={"customer_id": other_id, "ticket_id": foreign,
+            "kind": "chat", "minutes": 10, "note": "Не тот клиент"}).status_code, 422)
+
+        self.assertEqual(len(self.admin.get(f"/api/chats/{chat_id}").json()["service_entries"]), 2)
+        self.assertEqual(self.customer.get(f"/api/chats/{chat_id}").json()["service_entries"], [])
+        self.assertEqual(self.customer.get("/api/service-entries").status_code, 403)
+        overview = self.customer.get("/api/billing/overview").json()
+        self.assertNotIn("service_entries", overview)
+        self.assertEqual(overview["unbilled_minutes"], 75)
+        self.assertEqual(len(self.admin.get("/api/billing/overview").json()["service_entries"]), 2)
+
+        act = self.admin.post("/api/billing/invoices", json={"doc_type": "act", "client_type": "user", "client_id": cust_id,
+                                                             "ticket_ids": [], "service_entry_ids": [call.json()["id"]]})
+        self.assertEqual(act.status_code, 201)
+        self.assertEqual(act.json()["total_minutes"], 45)
+        self.assertEqual(act.json()["total_rub"], 2250)
+        printed = self.customer.get(f"/api/billing/invoices/{act.json()['id']}/print").text
+        self.assertIn(service.SERVICE_ACT_TITLE, printed)
+        self.assertNotIn("Созвон по срокам релиза", printed)
+        self.assertNotIn("Созвон по срокам релиза", str(self.customer.get(f"/api/billing/invoices/{act.json()['id']}").json()))
+        self.assertEqual(self.employee.delete(f"/api/service-entries/{call.json()['id']}").status_code, 409)
+        self.assertEqual(self.customer.get("/api/billing/overview").json()["balance_minutes"], -45)
+
+        self.assertEqual(self.admin.patch(f"/api/billing/invoices/{act.json()['id']}/status", json={"status": "cancelled"}).status_code, 200)
+        unbilled = self.admin.get(f"/api/service-entries?client_type=user&client_id={cust_id}&unbilled=true").json()
+        self.assertEqual({x["id"] for x in unbilled}, {call.json()["id"], chat["id"]})
+        self.assertEqual(self.employee.delete(f"/api/service-entries/{chat['id']}").status_code, 200)
+
+        self.assertEqual(self.employee.post("/api/service-entries", json={"customer_id": cust_id, "ticket_id": foreign,
+            "kind": "meeting", "minutes": 60, "note": "Встреча по заявке"}).status_code, 201)
+        detail = self.admin.get(f"/api/tickets/{foreign}").json()
+        self.assertEqual(detail["ticket"]["service_minutes"], 60)
+        self.assertEqual(detail["ticket"]["service_cost_rub"], 3000)
+        self.assertEqual([e["kind"] for e in detail["service_entries"]], ["meeting"])
+        customer_detail = self.customer.get(f"/api/tickets/{foreign}").json()
+        self.assertEqual(customer_detail["service_entries"], [])
+        self.assertEqual(customer_detail["ticket"]["service_minutes"], 60)
+        self.assertEqual(customer_detail["ticket"]["service_cost_rub"], 3000)
+
+    def test_company_chat_shared_history_notifications_and_revocation(self):
+        from unittest.mock import patch
+        owner_id = self.customer.get("/api/me").json()["id"]
+        member_id = self.other.get("/api/me").json()["id"]
+        org = self.admin.post("/api/organizations", json={"name": "Компания чата", "owner_id": owner_id}).json()
+        self.assertEqual(self.admin.post(f"/api/organizations/{org['id']}/members", json={"email": "o@example.com", "role": "viewer"}).status_code, 201)
+        outsider = TestClient(service.app)
+        outsider.post("/api/register", json={"name": "Чужой", "email": "outsider@example.com", "password": "password123"})
+        chat = self.other.post("/api/chats").json()
+        chat_id = chat["id"]
+        self.assertEqual(chat["organization_id"], org["id"])
+        self.assertEqual(chat["customer_name"], "Компания чата")
+        self.assertEqual(self.customer.post("/api/chats").json()["id"], chat_id)
+        self.assertEqual(len(self.customer.get("/api/chats").json()), 1)
+        self.assertEqual(outsider.get(f"/api/chats/{chat_id}").status_code, 404)
+        self.assertEqual(self.employee.get(f"/api/chats/{chat_id}").status_code, 404)
+        self.admin.patch(f"/api/chats/{chat_id}/assignee", json={"assignee_id": self.staff["id"]})
+        with patch.object(service.realtime_bus, "publish") as publish:
+            message = self.customer.post(f"/api/chats/{chat_id}/messages", json={"body": "Вопрос владельца", "request_id": "owner-msg"}).json()
+            self.assertTrue({owner_id, member_id, self.staff["id"]}.issubset({call.args[0] for call in publish.call_args_list if call.args[1]["type"] == "chat_message"}))
+        self.assertEqual(self.other.get(f"/api/chats/{chat_id}").json()["messages"][0]["body"], "Вопрос владельца")
+        self.assertEqual(len(self.other.get("/api/chat-notifications").json()), 1)
+        detail = self.customer.get(f"/api/chats/{chat_id}").json()
+        self.assertEqual({p["id"] for p in detail["participants"]}, {owner_id, member_id})
+        file = self.customer.post(f"/api/chats/{chat_id}/attachments", data={"message_id": message["id"]}, files={"file": ("shared.txt", b"company file", "text/plain")}).json()
+        self.assertEqual(self.other.get(f"/api/attachments/{file['id']}").content, b"company file")
+        self.assertEqual(outsider.get(f"/api/attachments/{file['id']}").status_code, 404)
+        self.other.post(f"/api/chats/{chat_id}/messages", json={"body": "Ответ коллеги", "request_id": "member-msg", "reply_to_id": message["id"]})
+        self.employee.post(f"/api/chats/{chat_id}/messages", json={"body": "Ответ поддержки", "request_id": "staff-msg"})
+        self.assertTrue(any(n["kind"] == "message" for n in self.customer.get("/api/chat-notifications").json()))
+        self.assertEqual(len(self.other.get(f"/api/chats/{chat_id}").json()["messages"]), 3)
+        ticket = self.employee.post(f"/api/chats/{chat_id}/tickets", json={"title": "Заявка владельца", "message_id": message["id"]})
+        self.assertEqual(ticket.status_code, 201)
+        self.assertEqual(ticket.json()["customer_id"], owner_id)
+        self.assertEqual(ticket.json()["organization_id"], org["id"])
+        self.assertEqual(self.other.get(f"/api/tickets/{ticket.json()['id']}").status_code, 200)
+        self.assertEqual(self.employee.get("/api/work-queue").json()[-1]["source"] in ("chat", "ticket"), True)
+        self.assertEqual(self.admin.delete(f"/api/organizations/{org['id']}/members/{member_id}").status_code, 200)
+        for endpoint in (f"/api/chats/{chat_id}", f"/api/attachments/{file['id']}"):
+            self.assertEqual(self.other.get(endpoint).status_code, 404)
+        self.assertEqual(self.other.post(f"/api/chats/{chat_id}/messages", json={"body": "Нет доступа", "request_id": "revoked-company-message"}).status_code, 404)
+        self.assertEqual(self.other.get("/api/chat-notifications").json(), [])
+        self.assertNotEqual(self.other.post("/api/chats").json()["id"], chat_id)
+
+    def test_company_chat_merges_legacy_threads_without_losing_links(self):
+        owner_id = self.customer.get("/api/me").json()["id"]
+        first = self.customer.post("/api/chats").json()["id"]
+        second = self.other.post("/api/chats").json()["id"]
+        m1 = self.customer.post(f"/api/chats/{first}/messages", json={"body": "История владельца", "request_id": "before-company-merge"}).json()
+        m2 = self.other.post(f"/api/chats/{second}/messages", json={"body": "История коллеги", "request_id": "before-company-merge"}).json()
+        file = self.other.post(f"/api/chats/{second}/attachments", data={"message_id": m2["id"]}, files={"file": ("legacy.txt", b"legacy file", "text/plain")}).json()
+        ticket = self.admin.post(f"/api/chats/{second}/tickets", json={"title": "Из старого чата", "message_id": m2["id"]}).json()
+        org = self.admin.post("/api/organizations", json={"name": "Объединённая компания", "owner_id": owner_id}).json()
+        self.admin.post(f"/api/organizations/{org['id']}/members", json={"email": "o@example.com", "role": "member"})
+        shared = self.other.post("/api/chats").json()
+        self.assertEqual(shared["id"], first)
+        detail = self.other.get(f"/api/chats/{second}").json()
+        self.assertEqual(detail["chat"]["id"], first)
+        self.assertEqual([m["id"] for m in detail["messages"]], [m1["id"], m2["id"]])
+        self.assertEqual(self.customer.get(f"/api/attachments/{file['id']}").content, b"legacy file")
+        self.assertEqual(self.admin.get(f"/api/chats/{first}").json()["linked_tickets"][0]["id"], ticket["id"])
+        self.assertEqual(self.other.post(f"/api/chats/{second}/messages", json={"body": "По старой ссылке", "request_id": "after-company-merge"}).status_code, 201)
+        self.assertEqual(self.other.post(f"/api/chats/{second}/read", json={"last_id": 0}).status_code, 200)
+        service.init_db()
+        service.init_db()
+        self.assertEqual(len(self.admin.get("/api/chats").json()), 1)
+        self.assertEqual(len(self.customer.get(f"/api/chats/{first}").json()["messages"]), 3)
+        with service.db() as conn:
+            self.assertEqual(conn.execute("PRAGMA foreign_key_check").fetchall(), [])
+
+    def test_company_chat_migrates_old_database_schema(self):
+        import sqlite3
+        original_path = service.DB_PATH
+        with tempfile.TemporaryDirectory() as folder:
+            legacy_path = Path(folder) / "legacy.db"
+            with service.db() as source:
+                target = sqlite3.connect(legacy_path)
+                source.backup(target)
+                target.close()
+            service.DB_PATH = legacy_path
+            try:
+                with service.db() as conn:
+                    conn.execute("PRAGMA foreign_keys=OFF")
+                    conn.executescript("""DROP TABLE chat_aliases;
+                        DROP TABLE chats;
+                        CREATE TABLE chats (id INTEGER PRIMARY KEY,
+                            customer_id INTEGER NOT NULL UNIQUE REFERENCES users(id),
+                            assignee_id INTEGER REFERENCES users(id),
+                            created_at TEXT NOT NULL,updated_at TEXT NOT NULL);""")
+                    owner = conn.execute("SELECT id FROM users WHERE email='c@example.com'").fetchone()[0]
+                    member = conn.execute("SELECT id FROM users WHERE email='o@example.com'").fetchone()[0]
+                    org = conn.execute("INSERT INTO organizations(name,created_at) VALUES('Legacy company',?)", (service.now(),)).lastrowid
+                    for cid, role, chat_id in ((owner, 'owner', 41), (member, 'member', 42)):
+                        conn.execute("INSERT INTO organization_members VALUES(?,?,?,?)", (org,cid,role,service.now()))
+                        conn.execute("INSERT INTO chats VALUES(?,?,NULL,?,?)", (chat_id,cid,service.now(),service.now()))
+                        conn.execute("INSERT INTO chat_messages(chat_id,author_id,body,request_id,created_at) VALUES(?,?,?,?,?)",
+                                     (chat_id,cid,role,'legacy-request-'+role,service.now()))
+                service.init_db()
+                service.init_db()
+                with service.db() as conn:
+                    chat = conn.execute("SELECT * FROM chats").fetchone()
+                    self.assertEqual(chat['id'],41)
+                    self.assertEqual(chat['organization_id'],org)
+                    self.assertEqual(conn.execute("SELECT COUNT(*) FROM chat_messages WHERE chat_id=41").fetchone()[0],2)
+                    self.assertEqual(service.company_chat.resolve(conn,42),41)
+                    self.assertEqual(conn.execute("PRAGMA foreign_key_check").fetchall(),[])
+                    # New IDs must never reuse a legacy alias.
+                    conn.execute("DELETE FROM organization_members WHERE user_id=?",(member,))
+                    person = conn.execute("SELECT * FROM users WHERE id=?",(member,)).fetchone()
+                    self.assertGreater(service.create_chat_service(conn,person)['id'],42)
+            finally:
+                service.DB_PATH = original_path
 
 
 if __name__ == "__main__":

@@ -160,13 +160,19 @@ class BotEngine:
             if e["state"] == "pending" and t["status"] != "closed":
                 buttons += [[self.button(conn, link, label, "decision", ticket=ticket_id, estimate=e["id"], decision=decision)]
                             for label, decision in [("Одобрить", "approve"), ("Запросить корректировку", "request_revision"), ("Отклонить", "reject")]]
+        if t["status"] == "done" and self.desk.customer_can_decide(conn, t, user):
+            buttons += [[self.button(conn, link, "Принять работу", "acceptance", ticket=ticket_id, decision="accept")],
+                        [self.button(conn, link, "Вернуть на доработку", "acceptance", ticket=ticket_id, decision="return")]]
+        if self.desk.customer_can_decline(conn, t, user):
+            buttons.append([self.button(conn, link, "Заявка не нужна", "decline", ticket=ticket_id)])
         buttons.append([self.button(conn, link, "Меню", "menu")])
         self.queue(conn, link, text, buttons, ("ticket", ticket_id))
 
     def chat(self, conn, link, user):
         chat = self.desk.create_chat_service(conn, user)
         self.set_state(conn, link, {"mode": "reply", "kind": "chat", "record": chat["id"]})
-        self.queue(conn, link, "Общий чат с компанией. Напишите сообщение. /cancel — отменить.",
+        audience = "Все участники вашей компании и команда поддержки видят переписку." if chat["organization_id"] else "Личный диалог с командой поддержки."
+        self.queue(conn, link, f"Общий чат: {chat['customer_name']}. {audience} Напишите сообщение. /cancel — отменить.",
                    [[self.button(conn, link, "История чата", "history", kind="chat", record=chat["id"])]], ("chat", chat["id"]))
 
     def check_context(self, conn, user, kind, record):
@@ -177,11 +183,14 @@ class BotEngine:
         raise HTTPException(422, "Неизвестный диалог")
 
     def history(self, conn, link, user, kind, record, before=None):
-        self.check_context(conn, user, kind, record)
+        record = self.check_context(conn, user, kind, record)["id"]
         table, key = ("messages", "ticket_id") if kind == "ticket" else ("chat_messages", "chat_id")
-        rows = conn.execute(f"""SELECT m.*,u.name FROM {table} m JOIN users u ON u.id=m.author_id
+        rows = conn.execute(f"""SELECT m.*,u.name,u.role AS author_role FROM {table} m JOIN users u ON u.id=m.author_id
             WHERE m.{key}=? AND m.id<? ORDER BY m.id DESC LIMIT 6""", (record, before or 9223372036854775807)).fetchall()
         for row in reversed(rows[:5]):
+            row = dict(row)
+            if user["role"] == "customer" and row["author_role"] != "customer":
+                row["name"] = self.desk.SUPPORT_NAME
             self.queue(conn, link, f"{'Заявка №' + str(record) if kind == 'ticket' else 'Общий чат'}\n{row['name']} · {row['created_at'][:16]}\n{row['body']}", context=(kind, record))
         buttons = [[self.button(conn, link, "Ответить", "reply", kind=kind, record=record)]]
         if len(rows) > 5:
@@ -225,7 +234,7 @@ class BotEngine:
                     self.check_context(conn, user, kind, row[key])
                 except HTTPException:
                     continue
-                result.append((row["created_at"], row["text"], kind, row[key]))
+                result.append((row["created_at"], self.desk.customer_notification_text(row["text"], user), kind, row[key]))
         buttons = [[self.button(conn, link, item[1][:65], "ticket" if item[2] == "ticket" else "history", kind=item[2], record=item[3])]
                    for item in sorted(result, reverse=True)[:8]]
         self.queue(conn, link, "Последние уведомления:" if result else "Уведомлений пока нет.", buttons)
@@ -295,6 +304,34 @@ class BotEngine:
             return self.queue(conn, link, f"{'Одобрить' if data['decision'] == 'approve' else 'Отклонить'} оценку заявки №{data['ticket']}?\nВерсия {estimate['version']} · {hours(estimate['effort_minutes'])}.\nОдобрение часов не списывает деньги.",
                               [[self.button(conn, link, "Подтвердить", "confirm_decision", ticket=data["ticket"], estimate=data["estimate"], decision=data["decision"])],
                                [self.button(conn, link, "Вернуться к заявке", "ticket", record=data["ticket"])]], ("ticket", data["ticket"]))
+        if action in ("acceptance", "confirm_acceptance"):
+            t = self.desk.ticket_for(conn, data["ticket"], user)
+            if t["status"] != "done":
+                self.queue(conn, link, "Работа уже принята или ещё не отправлена на проверку. Показываю актуальное состояние.")
+                return self.ticket(conn, link, user, data["ticket"])
+            if action == "confirm_acceptance":
+                self.desk.accept_work_service(conn, user, data["ticket"], self.desk.AcceptanceDecision(action="accept"))
+                self.set_state(conn, link, {})
+                self.queue(conn, link, f"Работа по заявке №{data['ticket']} принята, заявка закрыта. Спасибо!")
+                return self.ticket(conn, link, user, data["ticket"])
+            if data["decision"] == "return":
+                self.set_state(conn, link, {"mode": "return_comment", "ticket": data["ticket"]})
+                return self.queue(conn, link, "Напишите, что нужно доработать (до 3000 символов). /cancel — отменить.")
+            return self.queue(conn, link, f"Принять работу по заявке №{data['ticket']}? Заявка будет закрыта.",
+                              [[self.button(conn, link, "Принять", "confirm_acceptance", ticket=data["ticket"])],
+                               [self.button(conn, link, "Вернуться к заявке", "ticket", record=data["ticket"])]], ("ticket", data["ticket"]))
+        if action in ("decline", "confirm_decline"):
+            t = self.desk.ticket_for(conn, data["ticket"], user)
+            if not self.desk.customer_can_decline(conn, t, user):
+                self.queue(conn, link, "От этой заявки уже нельзя отказаться. Показываю актуальное состояние.")
+                return self.ticket(conn, link, user, data["ticket"])
+            if action == "confirm_decline":
+                self.desk.decline_ticket_service(conn, user, data["ticket"], self.desk.TicketDecline())
+                self.queue(conn, link, f"Заявка №{data['ticket']} закрыта — команда получила уведомление.")
+                return self.ticket(conn, link, user, data["ticket"])
+            return self.queue(conn, link, f"Отказаться от заявки №{data['ticket']}? Она закроется без работы и оплаты.",
+                              [[self.button(conn, link, "Да, не нужна", "confirm_decline", ticket=data["ticket"])],
+                               [self.button(conn, link, "Вернуться к заявке", "ticket", record=data["ticket"])]], ("ticket", data["ticket"]))
         raise HTTPException(422, "Неизвестное действие. Откройте /start.")
 
     def handle_text(self, conn, link, user, event):
@@ -344,6 +381,13 @@ class BotEngine:
             data = self.desk.EstimateDecision(estimate_id=state["estimate"], action="request_revision", comment=state["comment"], proposed_effort_minutes=minutes)
             self.desk.decide_estimate_service(conn, user, state["ticket"], data)
             self.set_state(conn, link, {})
+            return self.ticket(conn, link, user, state["ticket"])
+        if mode == "return_comment":
+            if len(text) > 3000:
+                raise HTTPException(422, "Комментарий должен быть не длиннее 3000 символов")
+            self.desk.accept_work_service(conn, user, state["ticket"], self.desk.AcceptanceDecision(action="return", comment=text))
+            self.set_state(conn, link, {})
+            self.queue(conn, link, f"Заявка №{state['ticket']} возвращена на доработку. Команда получила ваш комментарий.")
             return self.ticket(conn, link, user, state["ticket"])
         request_id = "bot-" + digest(event.provider + ":" + event.event_id)
         if event.reply_id:
@@ -415,10 +459,13 @@ class BotEngine:
             return
         if event_kind == "message":
             table, key = ("messages", "ticket_id") if kind == "ticket" else ("chat_messages", "chat_id")
-            msg = conn.execute(f"SELECT m.body,m.author_id,u.name FROM {table} m JOIN users u ON u.id=m.author_id WHERE {key}=? ORDER BY m.id DESC LIMIT 1", (record,)).fetchone()
+            msg = conn.execute(f"SELECT m.body,m.author_id,u.name,u.role AS author_role FROM {table} m JOIN users u ON u.id=m.author_id WHERE {key}=? ORDER BY m.id DESC LIMIT 1", (record,)).fetchone()
             if msg and msg["author_id"] == user_id:
                 return
             if msg:
+                msg = dict(msg)
+                if user["role"] == "customer" and msg["author_role"] != "customer":
+                    msg["name"] = self.desk.SUPPORT_NAME
                 text += f"\n{msg['name']}:\n{msg['body']}"
         if event_kind == "estimate":
             e = self.desk.latest_estimate(conn, record)

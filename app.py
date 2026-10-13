@@ -19,12 +19,18 @@ from datetime import datetime, timedelta, timezone
 from io import BytesIO, StringIO
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlsplit
 
 import httpx
 from fastapi import Cookie, FastAPI, Header, HTTPException, Request, Response, UploadFile, File, Form
 from fastapi.responses import FileResponse, StreamingResponse, HTMLResponse
 from pydantic import BaseModel, Field
 from PIL import Image, ImageOps, UnidentifiedImageError
+
+import mailer
+import team_management
+import company_chat
+from web_push import WebPush, b64url_decode
 
 
 ROOT = Path(__file__).resolve().parent
@@ -35,7 +41,7 @@ ATTACHMENT_DIR = DB_PATH.parent / f"{DB_PATH.stem}_attachments"
 LEGACY_ATTACHMENT_DIR = DB_PATH.parent / "attachments"
 MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
 ALLOWED_ATTACHMENT_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".pdf", ".txt", ".doc", ".docx", ".xls", ".xlsx", ".csv", ".zip"}
-app = FastAPI(title="Кабинет заявок", docs_url=None, redoc_url=None)
+app = FastAPI(title="Codari — рабочее пространство", docs_url=None, redoc_url=None)
 
 
 def now():
@@ -73,6 +79,7 @@ class RealtimeBus:
 
 
 realtime_bus = RealtimeBus()
+web_push = WebPush(DB_PATH)
 
 
 @contextmanager
@@ -104,6 +111,12 @@ def init_db():
         CREATE TABLE IF NOT EXISTS sessions (
             token_hash TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id),
             expires_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS account_tokens (
+            token_hash TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            kind TEXT NOT NULL CHECK(kind IN ('invite','reset')),
+            expires_at TEXT NOT NULL, created_at TEXT NOT NULL
         );
         CREATE TABLE IF NOT EXISTS staff_profiles (
             user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
@@ -224,6 +237,13 @@ def init_db():
         user_columns = {row["name"] for row in conn.execute("PRAGMA table_info(users)")}
         if "is_manager" not in user_columns:
             conn.execute("ALTER TABLE users ADD COLUMN is_manager INTEGER NOT NULL DEFAULT 0")
+        for name, declaration in {
+            "team_role": "TEXT CHECK(team_role IN ('programmer','integrator','devops'))",
+            "must_change_credentials": "INTEGER NOT NULL DEFAULT 0",
+            "temporary_credentials_expires_at": "TEXT",
+        }.items():
+            if name not in user_columns:
+                conn.execute(f"ALTER TABLE users ADD COLUMN {name} {declaration}")
         estimate_columns = {row["name"] for row in conn.execute("PRAGMA table_info(estimates)")}
         if "effort_minutes" not in estimate_columns:
             conn.execute("ALTER TABLE estimates ADD COLUMN effort_minutes INTEGER")
@@ -263,6 +283,14 @@ def init_db():
             id INTEGER PRIMARY KEY, title TEXT NOT NULL, body TEXT NOT NULL,
             category TEXT NOT NULL DEFAULT 'Общие', created_at TEXT NOT NULL
         );
+        """)
+        conn.executescript("""
+        CREATE TABLE IF NOT EXISTS push_subscriptions (
+            id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            endpoint TEXT NOT NULL UNIQUE, p256dh TEXT NOT NULL, auth TEXT NOT NULL,
+            user_agent TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user ON push_subscriptions(user_id);
         """)
         if conn.execute("SELECT COUNT(*) FROM canned_responses").fetchone()[0] == 0:
             stamp = now()
@@ -383,6 +411,7 @@ def init_db():
             "balance_minutes": "INTEGER NOT NULL DEFAULT 0",
             "inn": "TEXT NOT NULL DEFAULT ''",
             "legal_address": "TEXT NOT NULL DEFAULT ''",
+            "auto_approve_minutes": "INTEGER NOT NULL DEFAULT 0",
         }.items():
             if col not in cust_columns:
                 conn.execute(f"ALTER TABLE customer_profiles ADD COLUMN {col} {decl}")
@@ -433,10 +462,99 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_billing_tx_customer ON billing_transactions(customer_id, id);
         CREATE INDEX IF NOT EXISTS idx_billing_tx_org ON billing_transactions(organization_id, id);
         CREATE INDEX IF NOT EXISTS idx_tickets_act ON tickets(act_invoice_id);
+
+        CREATE TABLE IF NOT EXISTS service_entries (
+            id INTEGER PRIMARY KEY,
+            customer_id INTEGER NOT NULL REFERENCES users(id),
+            organization_id INTEGER REFERENCES organizations(id),
+            ticket_id INTEGER REFERENCES tickets(id),
+            author_id INTEGER NOT NULL REFERENCES users(id),
+            kind TEXT NOT NULL CHECK(kind IN ('chat','call','meeting','other')),
+            minutes INTEGER NOT NULL CHECK(minutes>0),
+            note TEXT NOT NULL,
+            occurred_at TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            request_id TEXT,
+            act_invoice_id INTEGER REFERENCES invoices(id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_service_entries_customer ON service_entries(customer_id, id);
+        CREATE INDEX IF NOT EXISTS idx_service_entries_org ON service_entries(organization_id, id);
+        CREATE INDEX IF NOT EXISTS idx_service_entries_act ON service_entries(act_invoice_id);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_service_entries_request ON service_entries(author_id, request_id);
+        """)
+        invoice_columns = {row['name'] for row in conn.execute('PRAGMA table_info(invoices)')}
+        for column, declaration in {'signed_at': 'TEXT', 'signed_by_id': 'INTEGER REFERENCES users(id)'}.items():
+            if column not in invoice_columns:
+                conn.execute(f'ALTER TABLE invoices ADD COLUMN {column} {declaration}')
+        conn.execute("UPDATE invoices SET signed_at=COALESCE(paid_at,created_at),status='issued',paid_at=NULL WHERE doc_type='act' AND status='paid'")
+        if 'service_limit_minutes' not in {row['name'] for row in conn.execute('PRAGMA table_info(tickets)')}:
+            conn.execute('ALTER TABLE tickets ADD COLUMN service_limit_minutes INTEGER CHECK(service_limit_minutes>=0)')
+
+        # Взаимодействие с клиентом: ответы на сообщения, прочтение, приёмка, итоги встреч, напоминания и почта.
+        for table in ("messages", "chat_messages"):
+            if "reply_to_id" not in {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN reply_to_id INTEGER")
+        ticket_columns = {row["name"] for row in conn.execute("PRAGMA table_info(tickets)")}
+        for col, decl in {"accepted_at": "TEXT", "accepted_by_id": "INTEGER REFERENCES users(id)"}.items():
+            if col not in ticket_columns:
+                conn.execute(f"ALTER TABLE tickets ADD COLUMN {col} {decl}")
+        service_columns = {row["name"] for row in conn.execute("PRAGMA table_info(service_entries)")}
+        for col in ("client_summary", "client_next_steps", "shared_at"):
+            if col not in service_columns:
+                conn.execute(f"ALTER TABLE service_entries ADD COLUMN {col} TEXT")
+        conn.executescript("""
+        CREATE TABLE IF NOT EXISTS ticket_templates (
+            id INTEGER PRIMARY KEY, name TEXT NOT NULL, title TEXT NOT NULL, description TEXT NOT NULL,
+            service_type TEXT NOT NULL DEFAULT 'other', effort_minutes INTEGER, estimate_note TEXT NOT NULL DEFAULT '',
+            created_by_id INTEGER NOT NULL REFERENCES users(id), created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS message_reads (
+            kind TEXT NOT NULL CHECK(kind IN ('ticket','chat')), record_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            last_read_id INTEGER NOT NULL, read_at TEXT NOT NULL,
+            PRIMARY KEY(kind, record_id, user_id)
+        );
+        CREATE TABLE IF NOT EXISTS customer_reminders (
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            ticket_id INTEGER NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+            kind TEXT NOT NULL, ref_id INTEGER NOT NULL,
+            count INTEGER NOT NULL DEFAULT 0, last_sent_at TEXT NOT NULL,
+            PRIMARY KEY(user_id, ticket_id, kind, ref_id)
+        );
+        CREATE TABLE IF NOT EXISTS email_preferences (
+            user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+            notify INTEGER NOT NULL, digest INTEGER NOT NULL DEFAULT 1,
+            digest_emails TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS email_outbox (
+            id INTEGER PRIMARY KEY, user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+            to_addr TEXT NOT NULL, kind TEXT NOT NULL, payload TEXT NOT NULL DEFAULT '{}',
+            subject TEXT, text_body TEXT, html_body TEXT,
+            state TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0,
+            available_at REAL NOT NULL, lease_until REAL, lease_token TEXT,
+            last_error TEXT, created_at TEXT NOT NULL, sent_at TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_email_outbox_pending ON email_outbox(state, available_at, id);
+        CREATE TABLE IF NOT EXISTS email_tokens (
+            token_hash TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            purpose TEXT NOT NULL CHECK(purpose IN ('action','reply')), action TEXT,
+            ticket_id INTEGER, chat_id INTEGER, ref_id INTEGER,
+            expires_at TEXT NOT NULL, used_at TEXT, created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS email_inbound (
+            message_id TEXT PRIMARY KEY, user_id INTEGER, kind TEXT, record_id INTEGER,
+            result TEXT NOT NULL, created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS digest_log (
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            period TEXT NOT NULL, sent_at TEXT NOT NULL, PRIMARY KEY(user_id, period)
+        );
         """)
 
         from bot.storage import init_bot_schema
         init_bot_schema(conn)
+        team_management.init_schema(conn)
+        company_chat.init_schema(conn)
 
 
 init_db()
@@ -464,10 +582,12 @@ def token_hash(token):
 def public_user(row):
     result = {key: row[key] for key in ("id", "name", "email", "role")}
     result["is_manager"] = bool(row["is_manager"])
+    result["team_role"] = row["team_role"]
+    result["must_change_credentials"] = bool(row["must_change_credentials"])
     return result
 
 
-def current_user(token):
+def current_user(token, allow_temporary=False):
     if not token:
         raise HTTPException(401, "Требуется вход")
     with db() as conn:
@@ -475,6 +595,11 @@ def current_user(token):
             WHERE s.token_hash=? AND s.expires_at>? AND u.active=1""", (token_hash(token), now())).fetchone()
     if not row:
         raise HTTPException(401, "Сессия завершена")
+    if row["must_change_credentials"]:
+        if row["temporary_credentials_expires_at"] <= now():
+            raise HTTPException(401, "Временный доступ истёк. Обратитесь к менеджеру")
+        if not allow_temporary:
+            raise HTTPException(403, "Сначала замените временные логин и пароль")
     return row
 
 
@@ -493,7 +618,17 @@ def require_dispatcher(user):
         raise HTTPException(403, "Недостаточно прав")
 
 
-def ticket_for(conn, ticket_id, user):
+def require_finance(user, write=False):
+    require_staff(user)
+    with db() as conn:
+        allowed = team_management.has_permission(conn,user,"billing_manage")
+        if not write:
+            allowed = allowed or team_management.has_permission(conn,user,"billing_read")
+        if not allowed:
+            raise HTTPException(403,"Нет разрешения на финансовые данные" if not write else "Нет разрешения на финансовые операции")
+
+
+def ticket_for(conn, ticket_id, user, write=True):
     row = conn.execute("""SELECT t.*, c.name AS customer_name, COALESCE(o.name,cp.company_name) AS customer_company, a.name AS assignee_name,
         creator.name AS created_by_name
         FROM tickets t JOIN users c ON c.id=t.customer_id
@@ -503,6 +638,8 @@ def ticket_for(conn, ticket_id, user):
         LEFT JOIN users creator ON creator.id=t.created_by_id WHERE t.id=?""", (ticket_id,)).fetchone()
     if not row or (user["role"] == "customer" and not customer_can_view_ticket(conn, row, user)) or (
         user["role"] == "employee" and not user["is_manager"] and row["assignee_id"] != user["id"]
+        and not (team_management.ticket_participation(conn, ticket_id, user["id"]) in (("executor",) if write else ("executor","reviewer","observer"))
+                 and (not write or team_management.has_permission(conn, user, "tasks")))
     ):
         raise HTTPException(404, "Заявка не найдена")
     return row
@@ -529,9 +666,21 @@ def customer_can_write_ticket(conn, ticket, user):
         AND user_id=? AND role IN ('owner','member')""", (ticket["organization_id"], user["id"])).fetchone())
 
 
+def customer_can_decline(conn, ticket, user):
+    """Заявку, которую за заказчика создала команда, он может отклонить, пока работа не согласована."""
+    if ticket["status"] != "new" or not customer_can_decide(conn, ticket, user):
+        return False
+    creator = conn.execute("SELECT role FROM users WHERE id=?", (ticket["created_by_id"],)).fetchone()
+    if not creator or creator["role"] == "customer":
+        return False
+    return not conn.execute("SELECT 1 FROM estimates WHERE ticket_id=? AND state='approved'", (ticket["id"],)).fetchone()
+
+
 def customer_can_decide(conn, ticket, user):
-    if ticket["customer_id"] == user["id"] and customer_can_write_ticket(conn, ticket, user):
-        return True
+    if user["role"] != "customer":
+        return False
+    if ticket["visibility"] != "organization" or ticket["organization_id"] is None:
+        return ticket["customer_id"] == user["id"]
     return bool(ticket["visibility"] == "organization" and ticket["organization_id"] is not None and
                 conn.execute("""SELECT 1 FROM organization_members WHERE organization_id=?
                     AND user_id=? AND role='owner'""", (ticket["organization_id"], user["id"])).fetchone())
@@ -551,6 +700,110 @@ def actual_minutes(conn, ticket_id):
                         (ticket_id,)).fetchone()[0]
 
 
+def contractor_time_summary(conn, ticket_id, work_minutes):
+    assessment = conn.execute("SELECT COALESCE(SUM(assessment_minutes),0) FROM estimates WHERE ticket_id=?",
+                              (ticket_id,)).fetchone()[0]
+    service = conn.execute("SELECT COALESCE(SUM(minutes),0) FROM service_entries WHERE is_billable=1 AND ticket_id=?",
+                           (ticket_id,)).fetchone()[0]
+    return {"assessment_minutes": assessment,
+            "contractor_total_minutes": work_minutes + assessment + service}
+
+
+SERVICE_KIND_NAMES = {"chat": "переписка", "call": "созвон", "meeting": "встреча", "other": "прочее"}
+# Клиент не видит отдельные записи сопровождения: в акте они сворачиваются в одну строку.
+SERVICE_ACT_TITLE = "Консультационное сопровождение и координация работ"
+
+SERVICE_ENTRY_SELECT = """SELECT s.*, a.name AS author_name, t.title AS ticket_title,
+    COALESCE(o.name, NULLIF(cp.company_name,''), c.name) AS client_name, i.number AS act_number
+    FROM service_entries s JOIN users a ON a.id=s.author_id JOIN users c ON c.id=s.customer_id
+    LEFT JOIN customer_profiles cp ON cp.user_id=s.customer_id
+    LEFT JOIN organizations o ON o.id=s.organization_id
+    LEFT JOIN tickets t ON t.id=s.ticket_id
+    LEFT JOIN invoices i ON i.id=s.act_invoice_id"""
+
+
+MESSAGE_SELECT = """SELECT m.id,m.body,m.created_at,m.author_id,u.name AS author_name,u.role AS author_role,
+    m.reply_to_id,r.body AS reply_body,ru.name AS reply_author_name,ru.role AS reply_author_role
+    FROM {table} m JOIN users u ON u.id=m.author_id
+    LEFT JOIN {table} r ON r.id=m.reply_to_id LEFT JOIN users ru ON ru.id=r.author_id"""
+TICKET_MESSAGE_SELECT = MESSAGE_SELECT.format(table="messages")
+CHAT_MESSAGE_SELECT = MESSAGE_SELECT.format(table="chat_messages")
+# Клиенту видны только дата, вид и итоги встречи — без минут и внутренней заметки.
+MEETING_SUMMARY_SELECT = """SELECT s.id,s.kind,s.ticket_id,s.occurred_at,s.shared_at,s.client_summary,s.client_next_steps,
+    s.author_id,a.name AS author_name FROM service_entries s JOIN users a ON a.id=s.author_id"""
+
+
+SUPPORT_NAME = "Служба поддержки"
+
+
+def customer_record(conn, row, viewer):
+    """Expose service identities to customers; retain staff attribution internally."""
+    item = dict(row)
+    if viewer["role"] != "customer":
+        return item
+    for key in ("assignee_id", "assignee_name", "assignee_profile", "participants"):
+        item.pop(key, None)
+    for prefix in ("author", "actor", "created_by"):
+        identity = item.get(f"{prefix}_id")
+        person = conn.execute("SELECT role FROM users WHERE id=?", (identity,)).fetchone() if identity else None
+        if person and person["role"] != "customer":
+            item.pop(f"{prefix}_id", None)
+            if f"{prefix}_name" in item:
+                item[f"{prefix}_name"] = SUPPORT_NAME
+    return item
+
+
+def message_dict(row, viewer=None):
+    item = dict(row)
+    if viewer is not None and viewer["role"] == "customer":
+        if item.get("author_role") != "customer":
+            item["author_name"] = SUPPORT_NAME
+            item.pop("author_id", None)
+            item["author_role"] = "support"
+        if item.get("reply_author_role") and item["reply_author_role"] != "customer":
+            item["reply_author_name"] = SUPPORT_NAME
+            item["reply_author_role"] = "support"
+    if item.get("reply_body") and len(item["reply_body"]) > 240:
+        item["reply_body"] = item["reply_body"][:240].rstrip() + "…"
+    return item
+
+
+def checked_reply(conn, table, key, record_id, reply_to_id):
+    if reply_to_id is None:
+        return None
+    if not conn.execute(f"SELECT 1 FROM {table} WHERE id=? AND {key}=?", (reply_to_id, record_id)).fetchone():
+        raise HTTPException(422, "Сообщение для ответа не найдено")
+    return reply_to_id
+
+
+def mark_read(conn, kind, record_id, user_id, last_id):
+    conn.execute("""INSERT INTO message_reads(kind,record_id,user_id,last_read_id,read_at) VALUES(?,?,?,?,?)
+        ON CONFLICT(kind,record_id,user_id) DO UPDATE SET last_read_id=MAX(last_read_id,excluded.last_read_id),
+        read_at=excluded.read_at""", (kind, record_id, user_id, last_id, now()))
+
+
+def read_state(conn, kind, record_id):
+    """Сколько прочитала каждая сторона: заказчик видит отметку «прочитано командой», команда — «прочитано заказчиком»."""
+    rows = conn.execute("""SELECT u.role='customer' AS customer, MAX(r.last_read_id) AS last_id FROM message_reads r
+        JOIN users u ON u.id=r.user_id WHERE r.kind=? AND r.record_id=? GROUP BY u.role='customer'""", (kind, record_id)).fetchall()
+    result = {"customer_read_id": 0, "team_read_id": 0}
+    for row in rows:
+        result["customer_read_id" if row["customer"] else "team_read_id"] = row["last_id"] or 0
+    return result
+
+
+def client_condition(client_type, client_id, prefix=""):
+    if client_type == "org":
+        return f"{prefix}organization_id = ?", (client_id,)
+    return f"{prefix}customer_id = ? AND {prefix}organization_id IS NULL", (client_id,)
+
+
+def unbilled_service_minutes(conn, client_type, client_id):
+    cond, params = client_condition(client_type, client_id)
+    return conn.execute(f"SELECT COALESCE(SUM(minutes),0) FROM service_entries WHERE {cond} AND is_billable=1 AND act_invoice_id IS NULL",
+                        params).fetchone()[0]
+
+
 def customer_recipients(conn, ticket):
     recipients = {ticket["customer_id"]} if ticket["visibility"] != "organization" else set()
     if ticket["visibility"] == "organization" and ticket["organization_id"] is not None:
@@ -560,15 +813,40 @@ def customer_recipients(conn, ticket):
     return recipients
 
 
+def customer_decision_recipients(conn, ticket):
+    if ticket["visibility"] == "organization" and ticket["organization_id"] is not None:
+        return {row["id"] for row in available_owners(conn, ticket["organization_id"])}
+    return {ticket["customer_id"]}
+
+
 def ticket_dict(row):
     return dict(row)
 
 
-def customer_next_step(ticket, estimate):
+def available_owners(conn, organization_id, exclude_id=0):
+    return conn.execute("""SELECT u.id,u.name FROM organization_members m JOIN users u ON u.id=m.user_id
+        WHERE m.organization_id=? AND m.role='owner' AND u.active=1 AND u.id!=?
+        AND (u.must_change_credentials=0 OR u.temporary_credentials_expires_at>?)
+        AND NOT EXISTS (SELECT 1 FROM account_tokens a WHERE a.user_id=u.id AND a.kind='invite')""",
+        (organization_id, exclude_id, now())).fetchall()
+
+
+def customer_next_step(ticket, estimate, conn=None, user=None):
+    if conn is not None and user is not None:
+        can_decide = customer_can_decide(conn, ticket, user)
+        decision_pending = ticket["status"] == "done" or (isinstance(ticket, dict) and ticket.get("pending_hour_request")) or (estimate and estimate["state"] == "pending")
+        if decision_pending and ticket["visibility"] == "organization":
+            owners = available_owners(conn, ticket["organization_id"])
+            if not owners:
+                return "Нет доступного владельца — обратитесь к менеджеру"
+            if not can_decide:
+                return "Ожидаем решения владельца: " + ", ".join(x["name"] for x in owners)
+        if ticket["status"] == "waiting" and not customer_can_write_ticket(conn, ticket, user):
+            return "Ожидаем ответа участника компании"
     if ticket["status"] == "closed":
         return "Заявка закрыта"
     if ticket["status"] == "done":
-        return "Проверьте результат"
+        return "Проверьте и примите работу"
     if ticket["status"] == "waiting":
         return "Нужен ваш ответ"
     if ticket["status"] == "working":
@@ -576,15 +854,32 @@ def customer_next_step(ticket, estimate):
             return "Согласуйте дополнительные часы"
         return "Работа идёт"
     if not ticket["assignee_id"]:
-        return "Назначаем ответственного"
+        return "Ожидает обработки"
     if not estimate or estimate["effort_minutes"] is None:
-        return "Сотрудник готовит оценку"
+        return "Готовим оценку"
     return {
         "pending": "Одобрите оценку трудозатрат",
         "approved": "Работа согласована и скоро начнётся",
         "rejected": "Ожидаем новую оценку",
-        "revision_requested": "Сотрудник пересчитывает трудозатраты",
-    }.get(estimate["state"], "Сотрудник готовит оценку")
+        "revision_requested": "Пересчитываем трудозатраты",
+    }.get(estimate["state"], "Готовим оценку")
+
+
+def auto_approve_estimate(conn, ticket_id, customer_id, estimate_id, effort_minutes):
+    """Оценку в пределах лимита заказчика одобряем сразу — его не дёргаем по мелким задачам."""
+    ticket = conn.execute("SELECT * FROM tickets WHERE id=?", (ticket_id,)).fetchone()
+    customer = conn.execute("SELECT * FROM users WHERE id=?", (customer_id,)).fetchone()
+    if not customer or not customer_can_decide(conn, ticket, customer):
+        return False
+    row = conn.execute("SELECT auto_approve_minutes FROM customer_profiles WHERE user_id=?", (customer_id,)).fetchone()
+    if not row or not row["auto_approve_minutes"] or effort_minutes > row["auto_approve_minutes"]:
+        return False
+    stamp = now()
+    conn.execute("UPDATE estimates SET state='approved',customer_comment=?,decided_at=? WHERE id=?",
+                 (f"Одобрено автоматически: в пределах лимита {fmt_hours(row['auto_approve_minutes'])}", stamp, estimate_id))
+    dispatch_webhooks("estimate.decided", {"event": "estimate.decided", "ticket_id": ticket_id, "action": "approve",
+                                           "new_state": "approved", "auto": True, "timestamp": stamp})
+    return True
 
 
 def latest_estimate(conn, ticket_id):
@@ -592,32 +887,57 @@ def latest_estimate(conn, ticket_id):
         WHERE e.ticket_id=? ORDER BY e.version DESC LIMIT 1""", (ticket_id,)).fetchone()
 
 
+def customer_notification_text(text, viewer):
+    if viewer["role"] == "customer" and text.startswith("Новое сообщение в общем чате:"):
+        return "Новое сообщение в общем чате"
+    return text
+
+
 def notify(conn, user_id, ticket_id, kind, message):
     if user_id is None:
         return
-    conn.execute("INSERT INTO notifications(user_id,ticket_id,kind,text,created_at) VALUES(?,?,?,?,?)",
-                 (user_id, ticket_id, kind, message, now()))
+    cursor = conn.execute("INSERT INTO notifications(user_id,ticket_id,kind,text,created_at) VALUES(?,?,?,?,?)",
+                          (user_id, ticket_id, kind, message, now()))
     bot_engine.enqueue_notification(conn, user_id, "ticket", ticket_id, kind, message)
     realtime_bus.publish(user_id, {"type": "notification", "target": "ticket", "record_id": ticket_id, "kind": kind, "text": message})
+    web_push.enqueue(user_id, {"title": f"Заявка №{ticket_id}", "body": message, "url": f"/#ticket/{ticket_id}", "tag": f"ticket-{ticket_id}"})
+    queue_notification_email(conn, user_id, "ticket", ticket_id, kind, message, cursor.lastrowid)
 
 
 def chat_for(conn, chat_id, user):
-    row = conn.execute("""SELECT c.*,u.name AS customer_name,a.name AS assignee_name
-        FROM chats c JOIN users u ON u.id=c.customer_id
-        LEFT JOIN users a ON a.id=c.assignee_id WHERE c.id=?""", (chat_id,)).fetchone()
-    if not row or (user["role"] == "customer" and row["customer_id"] != user["id"]) or (
+    chat_id = company_chat.resolve(conn, chat_id)
+    row = conn.execute(company_chat.SELECT + " WHERE c.id=?", (chat_id,)).fetchone()
+    if row and row["organization_id"] is None:
+        org = customer_organization(conn, row["customer_id"])
+        if org:
+            chat_id = company_chat.sync_organization(conn, org["id"])
+            row = conn.execute(company_chat.SELECT + " WHERE c.id=?", (chat_id,)).fetchone()
+    if not row or (user["role"] == "customer" and not company_chat.can_access(conn, row, user)) or (
         user["role"] == "employee" and not user["is_manager"] and row["assignee_id"] != user["id"]
     ):
         raise HTTPException(404, "Чат не найден")
     return row
 
 
+def chat_recipients(conn, chat):
+    return company_chat.customers(conn, chat)
+
+
+def chat_message_recipients(conn, chat, user):
+    recipients = chat_recipients(conn, chat) - {user["id"]}
+    if user["role"] == "customer":
+        recipients |= {chat["assignee_id"]} if chat["assignee_id"] else dispatcher_ids(conn)
+    return recipients
+
+
 def notify_chat(conn, user_id, chat_id, kind, message):
     if user_id is not None:
-        conn.execute("INSERT INTO chat_notifications(user_id,chat_id,kind,text,created_at) VALUES(?,?,?,?,?)",
-                     (user_id, chat_id, kind, message, now()))
+        cursor = conn.execute("INSERT INTO chat_notifications(user_id,chat_id,kind,text,created_at) VALUES(?,?,?,?,?)",
+                              (user_id, chat_id, kind, message, now()))
         bot_engine.enqueue_notification(conn, user_id, "chat", chat_id, kind, message)
         realtime_bus.publish(user_id, {"type": "notification", "target": "chat", "record_id": chat_id, "kind": kind, "text": message})
+        web_push.enqueue(user_id, {"title": "Общий чат", "body": message, "url": f"/#chat/{chat_id}", "tag": f"chat-{chat_id}"})
+        queue_notification_email(conn, user_id, "chat", chat_id, kind, message, cursor.lastrowid)
 
 
 class Credentials(BaseModel):
@@ -629,16 +949,41 @@ class Register(Credentials):
     name: str = Field(min_length=2, max_length=100)
 
 
-class DemoRequest(BaseModel):
-    name: str = Field(min_length=2, max_length=100)
-    company: str = Field(default="", max_length=200)
-    contact: str = Field(min_length=3, max_length=120)
-    team_size: str = Field(default="", max_length=20)
-    consent: bool
-
-
 class StaffCreate(Register):
     staff_role: Literal["employee", "manager"] = "employee"
+    team_role: Literal["programmer", "integrator", "devops"] | None = None
+    functions: list[str] = Field(default_factory=list, max_length=30)
+
+
+class StaffTeamRoleUpdate(BaseModel):
+    team_role: Literal["programmer", "integrator", "devops"] | None
+
+
+class StaffAvailability(BaseModel):
+    active: bool
+    replacement_id: int | None = None
+    transfer_work: bool = False
+
+
+class AccountInvitation(BaseModel):
+    name: str = Field(min_length=2, max_length=100)
+    email: str = Field(min_length=3, max_length=254)
+    organization_id: int | None = None
+    role: Literal["owner", "member", "viewer"] = "member"
+    company_name: str | None = Field(default=None, min_length=2, max_length=150)
+
+
+class AccountEmail(BaseModel):
+    email: str = Field(min_length=3, max_length=254)
+
+
+class AccountTokenPassword(BaseModel):
+    token: str = Field(min_length=20, max_length=128)
+    password: str = Field(min_length=8, max_length=128)
+
+
+class ReopenTicket(BaseModel):
+    reason: str = Field(min_length=3, max_length=2000)
 
 
 class ProfileUpdate(BaseModel):
@@ -651,6 +996,8 @@ class CustomerProfileUpdate(BaseModel):
     name: str = Field(min_length=2, max_length=100)
     company_name: str = Field(default="", max_length=150)
     phone: str = Field(default="", max_length=40)
+    # None — не менять. 0 — всегда спрашивать заказчика.
+    auto_approve_minutes: int | None = Field(default=None, ge=0, le=100_000)
 
 
 class AvatarUpload(BaseModel):
@@ -663,12 +1010,43 @@ class TicketCreate(BaseModel):
     customer_id: int | None = None
     assignee_id: int | None = None
     visibility: Literal["private", "organization"] = "private"
-    service_type: Literal["development", "integration", "support", "consultation", "other"] = "other"
+    service_type: str = Field(default="other", max_length=87, pattern=r"^(development|new_development|integration|support|maintenance|consultation|other|custom:\S[^\r\n]{0,79})$")
+    # Сотрудник может сразу приложить оценку: заказчику останется только согласовать её.
+    effort_minutes: int | None = Field(default=None, ge=1, le=100_000)
+    assessment_minutes: int | None = Field(default=None, ge=1, le=100_000)
+    estimate_note: str = Field(default="", max_length=3000)
+
+
+class TicketDecline(BaseModel):
+    comment: str = Field(default="", max_length=3000)
+
+
+class TicketTemplateCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=80)
+    title: str = Field(min_length=3, max_length=140)
+    description: str = Field(min_length=5, max_length=10000)
+    service_type: str = Field(default="other", max_length=87, pattern=r"^(development|new_development|integration|support|maintenance|consultation|other|custom:\S[^\r\n]{0,79})$")
+    effort_minutes: int | None = Field(default=None, ge=1, le=100_000)
+    estimate_note: str = Field(default="", max_length=3000)
+
+
+class BulkEstimateApproval(BaseModel):
+    estimate_ids: list[int] = Field(min_length=1, max_length=100)
 
 
 class MessageCreate(BaseModel):
     body: str = Field(min_length=1, max_length=10000)
     request_id: str = Field(min_length=8, max_length=100)
+    reply_to_id: int | None = None
+
+
+class ReadMark(BaseModel):
+    last_id: int | None = None
+
+
+class AcceptanceDecision(BaseModel):
+    action: Literal["accept", "return"]
+    comment: str = Field(default="", max_length=3000)
 
 
 class Assignment(BaseModel):
@@ -703,6 +1081,31 @@ class TimeEntryCreate(BaseModel):
     request_id: str | None = Field(default=None, min_length=8, max_length=100)
 
 
+class ServiceEntryCreate(BaseModel):
+    customer_id: int
+    ticket_id: int | None = None
+    kind: Literal["chat", "call", "meeting", "other"]
+    minutes: int = Field(ge=1, le=24 * 60)
+    note: str = Field(min_length=3, max_length=2000)
+    occurred_at: datetime | None = None
+    request_id: str | None = Field(default=None, min_length=8, max_length=100)
+    summary: str = Field(default="", max_length=3000)
+    next_steps: str = Field(default="", max_length=2000)
+    share: bool = False
+
+
+class MeetingSummaryUpdate(BaseModel):
+    summary: str = Field(min_length=3, max_length=3000)
+    next_steps: str = Field(default="", max_length=2000)
+    share: bool = True
+
+
+class EmailPreferencesUpdate(BaseModel):
+    notify: bool
+    digest: bool = True
+    digest_emails: list[str] = Field(default_factory=list, max_length=3)
+
+
 class HourRequestCreate(BaseModel):
     minutes: int = Field(ge=1, le=100_000)
     reason: str = Field(min_length=3, max_length=2000)
@@ -711,6 +1114,16 @@ class HourRequestCreate(BaseModel):
 
 class HourRequestDecision(BaseModel):
     action: Literal["approve", "reject"]
+
+
+class CompanyOwnerCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=100)
+    organization_id: int | None = Field(default=None, gt=0)
+    company_name: str = Field(default="", max_length=150)
+
+
+class PermanentCredentials(Credentials):
+    current_password: str = Field(min_length=8, max_length=128)
 
 
 class OrganizationCreate(BaseModel):
@@ -811,11 +1224,16 @@ class BillingDocumentCreate(BaseModel):
     period_start: str | None = None
     period_end: str | None = None
     ticket_ids: list[int] | None = None
+    service_entry_ids: list[int] | None = None
     notes: str = Field(default="", max_length=500)
 
 
 class BillingStatusUpdate(BaseModel):
-    status: Literal["issued", "paid", "cancelled"]
+    status: Literal["issued", "paid", "cancelled", "signed"]
+
+
+class ServiceBudgetUpdate(BaseModel):
+    limit_minutes: int | None = Field(default=None, ge=0, le=100000)
 
 
 def clean_email(email):
@@ -843,12 +1261,19 @@ def issue_session(conn, user, response):
     return public_user(user)
 
 
+def billing_enabled() -> bool:
+    """Биллинг доступен по умолчанию; BILLING_ENABLED=0 отключает раздел."""
+    return os.getenv("BILLING_ENABLED", "1").strip().lower() in ("1", "true", "yes", "on")
+
+
 AUTH_RATE_LIMITS: dict[str, list[float]] = {}
 RATE_LIMIT_MAX = int(os.getenv("RATE_LIMIT_PER_MINUTE", "60"))
 
 
 @app.middleware("http")
 async def same_origin_writes(request: Request, call_next):
+    if request.url.path.startswith("/api/billing") and not billing_enabled():
+        return Response(status_code=404, content=json.dumps({"detail": "Раздел биллинга отключён"}, ensure_ascii=False), media_type="application/json")
     if request.method in ("POST", "PUT", "PATCH", "DELETE"):
         origin = request.headers.get("origin")
         expected = str(request.base_url).rstrip("/")
@@ -956,9 +1381,86 @@ def dispatch_webhooks(event: str, payload: dict):
         pass
 
 
+# Браузер сверяет версию по ETag и не держит устаревшие скрипты и стили.
+NO_CACHE = {"Cache-Control": "no-cache"}
+
+
 @app.get("/")
-def home():
-    return FileResponse(ROOT / "web" / "index.html")
+def home(request: Request, desk_session: str | None = Cookie(default=None)):
+    wants_cabinet = any(key in request.query_params for key in ("login", "register", "invite", "reset"))
+    if not wants_cabinet:
+        try:
+            current_user(desk_session)
+        except HTTPException:
+            return FileResponse(ROOT / "web" / "landing.html", headers=NO_CACHE)
+    return FileResponse(ROOT / "web" / "index.html", headers=NO_CACHE)
+
+
+
+class DemoRequest(BaseModel):
+    name: str = Field(min_length=2, max_length=100)
+    company: str = Field(default="", max_length=200)
+    contact: str = Field(min_length=3, max_length=120)
+    team_size: str = Field(default="", max_length=20)
+    consent: bool
+
+
+@app.get("/landing.js")
+def landing_script():
+    return FileResponse(ROOT / "web" / "landing.js", media_type="text/javascript", headers=NO_CACHE)
+
+
+@app.get("/workspace.css")
+def workspace_style():
+    return FileResponse(ROOT / "web" / "workspace.css", media_type="text/css", headers=NO_CACHE)
+
+
+@app.get("/codari.css")
+def codari_style():
+    return FileResponse(ROOT / "web" / "codari.css", media_type="text/css", headers=NO_CACHE)
+
+
+@app.get("/theme.css")
+def theme():
+    return FileResponse(ROOT / "web" / "theme.css", media_type="text/css", headers=NO_CACHE)
+
+
+@app.get("/motion.css")
+def motion():
+    return FileResponse(ROOT / "web" / "motion.css", media_type="text/css", headers=NO_CACHE)
+
+
+@app.get("/tour.css")
+def tour_style():
+    return FileResponse(ROOT / "web" / "tour.css", media_type="text/css", headers=NO_CACHE)
+
+
+@app.get("/tour.js")
+def tour_script():
+    return FileResponse(ROOT / "web" / "tour.js", media_type="text/javascript", headers=NO_CACHE)
+
+
+@app.post("/api/demo-requests")
+def create_demo_request(data: DemoRequest):
+    if not data.consent:
+        raise HTTPException(400, "Нужно согласие на обработку персональных данных")
+    with db() as conn:
+        conn.execute(
+            "INSERT INTO demo_requests(name,company,contact,team_size,created_at) VALUES(?,?,?,?,?)",
+            (data.name.strip(), data.company.strip(), data.contact.strip(), data.team_size.strip(), now()),
+        )
+    return {"ok": True}
+
+
+
+@app.get("/api/public/settings")
+def public_settings():
+    return {"hourly_rate_rub": int(os.getenv("DEFAULT_HOURLY_RATE_RUB", "3000")), "billing_enabled": billing_enabled()}
+
+
+@app.get("/landing")
+def landing():
+    return FileResponse(ROOT / "web" / "landing.html", headers=NO_CACHE)
 
 
 @app.get("/style.css")
@@ -968,27 +1470,7 @@ def style():
 
 @app.get("/design.css")
 def design():
-    return FileResponse(ROOT / "web" / "design.css", media_type="text/css")
-
-
-@app.get("/landing")
-def landing():
-    return FileResponse(ROOT / "web" / "landing.html")
-
-
-@app.get("/landing.js")
-def landing_script():
-    return FileResponse(ROOT / "web" / "landing.js", media_type="text/javascript")
-
-
-@app.get("/theme.css")
-def theme():
-    return FileResponse(ROOT / "web" / "theme.css", media_type="text/css")
-
-
-@app.get("/motion.css")
-def motion():
-    return FileResponse(ROOT / "web" / "motion.css", media_type="text/css")
+    return FileResponse(ROOT / "web" / "design.css", media_type="text/css", headers=NO_CACHE)
 
 
 @app.get("/design-concepts")
@@ -998,7 +1480,17 @@ def design_concepts():
 
 @app.get("/main.js")
 def script():
-    return FileResponse(ROOT / "web" / "main.js", media_type="text/javascript")
+    return FileResponse(ROOT / "web" / "main.js", media_type="text/javascript", headers=NO_CACHE)
+
+
+@app.get("/team.js")
+def team_script():
+    return FileResponse(ROOT / "web" / "team.js", media_type="text/javascript", headers=NO_CACHE)
+
+
+@app.get("/tasks.js")
+def tasks_script():
+    return FileResponse(ROOT / "web" / "tasks.js", media_type="text/javascript", headers=NO_CACHE)
 
 
 @app.get("/manifest.json")
@@ -1008,12 +1500,88 @@ def manifest():
 
 @app.get("/sw.js")
 def service_worker():
-    return FileResponse(ROOT / "web" / "sw.js", media_type="application/javascript")
+    return FileResponse(ROOT / "web" / "sw.js", media_type="application/javascript", headers=NO_CACHE)
+
+
+PWA_ICONS = {"icon-192.png", "icon-512.png", "maskable-512.png", "apple-touch-icon.png", "badge-96.png"}
+
+
+@app.get("/icons/{name}")
+def pwa_png_icon(name: str):
+    if name not in PWA_ICONS:
+        raise HTTPException(404, "Не найдено")
+    return FileResponse(ROOT / "web" / "icons" / name, media_type="image/png", headers={"Cache-Control": "public, max-age=604800"})
 
 
 @app.get("/icon.svg")
 def pwa_icon():
     return FileResponse(ROOT / "web" / "icon.svg", media_type="image/svg+xml")
+
+
+# Push-уведомления: сервер отправляет запросы только известным push-сервисам браузеров.
+PUSH_HOSTS = ("fcm.googleapis.com", ".push.services.mozilla.com", ".notify.windows.com", "web.push.apple.com", ".push.apple.com")
+
+
+class PushKeys(BaseModel):
+    p256dh: str = Field(min_length=80, max_length=120)
+    auth: str = Field(min_length=16, max_length=40)
+
+
+class PushSubscriptionIn(BaseModel):
+    endpoint: str = Field(min_length=20, max_length=1000)
+    keys: PushKeys
+
+
+class PushEndpoint(BaseModel):
+    endpoint: str = Field(min_length=20, max_length=1000)
+
+
+def push_endpoint_allowed(endpoint: str) -> bool:
+    parts = urlsplit(endpoint)
+    host = (parts.hostname or "").lower()
+    return parts.scheme == "https" and any(host == h or (h.startswith(".") and host.endswith(h)) for h in PUSH_HOSTS)
+
+
+@app.get("/api/push/key")
+def push_key(desk_session: str | None = Cookie(default=None)):
+    current_user(desk_session)
+    return {"public_key": web_push.public_key}
+
+
+@app.post("/api/push/subscribe")
+def push_subscribe(data: PushSubscriptionIn, request: Request, desk_session: str | None = Cookie(default=None)):
+    user = current_user(desk_session)
+    if not push_endpoint_allowed(data.endpoint):
+        raise HTTPException(422, "Этот браузер не поддерживает уведомления")
+    try:
+        valid = len(b64url_decode(data.keys.p256dh)) == 65 and len(b64url_decode(data.keys.auth)) == 16
+    except (ValueError, binascii.Error):
+        valid = False
+    if not valid:
+        raise HTTPException(422, "Некорректная подписка на уведомления")
+    with db() as conn:
+        conn.execute("""INSERT INTO push_subscriptions(user_id,endpoint,p256dh,auth,user_agent,created_at) VALUES(?,?,?,?,?,?)
+            ON CONFLICT(endpoint) DO UPDATE SET user_id=excluded.user_id,p256dh=excluded.p256dh,auth=excluded.auth,user_agent=excluded.user_agent""",
+                     (user["id"], data.endpoint, data.keys.p256dh, data.keys.auth, request.headers.get("user-agent", "")[:300], now()))
+    return {"ok": True}
+
+
+@app.post("/api/push/unsubscribe")
+def push_unsubscribe(data: PushEndpoint, desk_session: str | None = Cookie(default=None)):
+    user = current_user(desk_session)
+    with db() as conn:
+        conn.execute("DELETE FROM push_subscriptions WHERE endpoint=? AND user_id=?", (data.endpoint, user["id"]))
+    return {"ok": True}
+
+
+@app.post("/api/push/test")
+def push_test(desk_session: str | None = Cookie(default=None)):
+    user = current_user(desk_session)
+    with db() as conn:
+        devices = conn.execute("SELECT COUNT(*) FROM push_subscriptions WHERE user_id=?", (user["id"],)).fetchone()[0]
+    if devices:
+        web_push.enqueue(user["id"], {"title": "Codari", "body": "Уведомления на этом устройстве работают", "url": "/", "tag": "push-test"})
+    return {"devices": devices}
 
 
 @app.get("/api/events")
@@ -1049,24 +1617,15 @@ def register(data: Register, response: Response):
         return issue_session(conn, user, response)
 
 
-@app.post("/api/demo-requests")
-def create_demo_request(data: DemoRequest):
-    if not data.consent:
-        raise HTTPException(400, "Нужно согласие на обработку персональных данных")
-    with db() as conn:
-        conn.execute(
-            "INSERT INTO demo_requests(name,company,contact,team_size,created_at) VALUES(?,?,?,?,?)",
-            (data.name.strip(), data.company.strip(), data.contact.strip(), data.team_size.strip(), now()),
-        )
-    return {"ok": True}
-
-
 @app.post("/api/login")
 def login(data: Credentials, response: Response):
     with db() as conn:
         user = conn.execute("SELECT * FROM users WHERE email=?", (clean_email(data.email),)).fetchone()
         if not user or not user["active"] or not verify_password(data.password, user["password_hash"]):
             raise HTTPException(401, "Неверный email или пароль")
+        if user["must_change_credentials"] and user["temporary_credentials_expires_at"] <= now():
+            raise HTTPException(401, "Временный доступ истёк. Обратитесь к менеджеру")
+        response.headers["Cache-Control"] = "no-store"
         return issue_session(conn, user, response)
 
 
@@ -1081,29 +1640,24 @@ def logout(response: Response, desk_session: str | None = Cookie(default=None)):
 
 @app.get("/api/me")
 def me(desk_session: str | None = Cookie(default=None)):
-    return public_user(current_user(desk_session))
+    return public_user(current_user(desk_session, allow_temporary=True))
 
 
 def staff_profile(conn, user):
     row = conn.execute("SELECT job_title,bio,avatar_updated_at,updated_at FROM staff_profiles WHERE user_id=?", (user["id"],)).fetchone()
     avatar_url = f"/api/staff/{user['id']}/avatar?v={row['avatar_updated_at']}" if row and row["avatar_updated_at"] else None
     return {"id": user["id"], "name": user["name"], "role": user["role"],
-            "is_manager": bool(user["is_manager"]), "job_title": row["job_title"] if row else "",
-            "bio": row["bio"] if row else "", "avatar_url": avatar_url}
+            "is_manager": bool(user["is_manager"]), "team_role": conn.execute("SELECT team_role FROM users WHERE id=?", (user["id"],)).fetchone()["team_role"], "job_title": row["job_title"] if row else "",
+            "bio": row["bio"] if row else "", "avatar_url": avatar_url, "functions": team_management.function_codes(conn, user["id"]),
+            "function_names": [r[0] for r in conn.execute("SELECT f.name FROM staff_functions sf JOIN team_functions f ON f.code=sf.function_code WHERE sf.user_id=? ORDER BY f.name", (user["id"],))]}
 
 
 def visible_staff(conn, staff_id, viewer):
+    if viewer["role"] == "customer":
+        raise HTTPException(404, "Сотрудник не найден")
     person = conn.execute("SELECT * FROM users WHERE id=? AND role IN ('employee','admin') AND active=1", (staff_id,)).fetchone()
     if not person:
         raise HTTPException(404, "Сотрудник не найден")
-    if viewer["role"] == "customer":
-        allowed = conn.execute("""SELECT 1 FROM tickets t WHERE t.assignee_id=? AND
-            ((t.visibility!='organization' AND t.customer_id=?) OR (t.visibility='organization' AND t.organization_id IN
-            (SELECT organization_id FROM organization_members WHERE user_id=?)))
-            UNION SELECT 1 FROM chats WHERE customer_id=? AND assignee_id=?""",
-            (staff_id, viewer["id"], viewer["id"], viewer["id"], staff_id)).fetchone()
-        if not allowed:
-            raise HTTPException(404, "Сотрудник не найден")
     return person
 
 
@@ -1135,10 +1689,10 @@ def update_profile(data: ProfileUpdate, desk_session: str | None = Cookie(defaul
 
 
 def customer_profile(conn, user):
-    row = conn.execute("SELECT company_name,phone FROM customer_profiles WHERE user_id=?", (user["id"],)).fetchone()
+    row = conn.execute("SELECT company_name,phone,auto_approve_minutes FROM customer_profiles WHERE user_id=?", (user["id"],)).fetchone()
     return {"id": user["id"], "name": user["name"], "email": user["email"],
             "role": "customer", "company_name": row["company_name"] if row else "",
-            "phone": row["phone"] if row else ""}
+            "phone": row["phone"] if row else "", "auto_approve_minutes": row["auto_approve_minutes"] if row else 0}
 
 
 @app.get("/api/customer-profile/me")
@@ -1168,6 +1722,8 @@ def update_customer_profile(data: CustomerProfileUpdate, desk_session: str | Non
             ON CONFLICT(user_id) DO UPDATE SET company_name=excluded.company_name,
             phone=excluded.phone,updated_at=excluded.updated_at""",
             (user["id"], company, phone, now()))
+        if data.auto_approve_minutes is not None:
+            conn.execute("UPDATE customer_profiles SET auto_approve_minutes=? WHERE user_id=?", (data.auto_approve_minutes, user["id"]))
         updated = conn.execute("SELECT * FROM users WHERE id=?", (user["id"],)).fetchone()
         return customer_profile(conn, updated)
 
@@ -1241,8 +1797,8 @@ def notifications(desk_session: str | None = Cookie(default=None)):
         visible = []
         for row in rows:
             try:
-                ticket_for(conn, row["ticket_id"], user)
-                visible.append(dict(row))
+                ticket_for(conn, row["ticket_id"], user, write=False)
+                visible.append({**dict(row), "text": customer_notification_text(row["text"], user)})
             except HTTPException:
                 continue
     return visible
@@ -1271,7 +1827,7 @@ def chat_notifications(desk_session: str | None = Cookie(default=None)):
         for row in rows:
             try:
                 chat_for(conn, row["chat_id"], user)
-                visible.append(dict(row))
+                visible.append({**dict(row), "text": customer_notification_text(row["text"], user)})
             except HTTPException:
                 continue
     return visible
@@ -1294,16 +1850,20 @@ def read_chat_notification(notification_id: int, desk_session: str | None = Cook
 def chats(desk_session: str | None = Cookie(default=None)):
     user = current_user(desk_session)
     with db() as conn:
-        sql = """SELECT c.*,u.name AS customer_name,a.name AS assignee_name,
+        for org in conn.execute("SELECT id FROM organizations").fetchall():
+            company_chat.sync_organization(conn, org["id"])
+        sql = company_chat.SELECT.replace("FROM chats c", """ ,
             (SELECT body FROM chat_messages WHERE chat_id=c.id ORDER BY id DESC LIMIT 1) AS last_message
-            FROM chats c JOIN users u ON u.id=c.customer_id LEFT JOIN users a ON a.id=c.assignee_id"""
+            FROM chats c""", 1)
         if user["role"] == "customer":
-            rows = conn.execute(sql + " WHERE c.customer_id=? ORDER BY c.updated_at DESC", (user["id"],)).fetchall()
+            rows = conn.execute(sql + """ WHERE (c.organization_id IS NULL AND c.customer_id=?) OR
+                c.organization_id IN (SELECT organization_id FROM organization_members WHERE user_id=?)
+                ORDER BY c.updated_at DESC""", (user["id"], user["id"])).fetchall()
         elif user["role"] == "employee" and not user["is_manager"]:
             rows = conn.execute(sql + " WHERE c.assignee_id=? ORDER BY c.updated_at DESC", (user["id"],)).fetchall()
         else:
             rows = conn.execute(sql + " ORDER BY c.updated_at DESC").fetchall()
-    return [dict(row) for row in rows]
+        return [customer_record(conn, row, user) for row in rows]
 
 
 @app.post("/api/chats", status_code=201)
@@ -1311,20 +1871,24 @@ def create_chat(desk_session: str | None = Cookie(default=None)):
     user = current_user(desk_session)
     with db() as conn:
         conn.execute("BEGIN IMMEDIATE")
-        return create_chat_service(conn, user)
+        return customer_record(conn, create_chat_service(conn, user), user)
 
 
 def create_chat_service(conn, user):
     if user["role"] != "customer":
         raise HTTPException(403, "Общий чат создаёт заказчик")
-    existing = conn.execute("SELECT id FROM chats WHERE customer_id=?", (user["id"],)).fetchone()
-    if existing:
-        return dict(chat_for(conn, existing["id"], user))
+    org = customer_organization(conn, user["id"])
+    existing_id = company_chat.sync_organization(conn, org["id"]) if org else None
+    if not org:
+        existing = conn.execute("SELECT id FROM chats WHERE customer_id=? AND organization_id IS NULL", (user["id"],)).fetchone()
+        existing_id = existing["id"] if existing else None
+    if existing_id:
+        return dict(chat_for(conn, existing_id, user))
     stamp = now()
-    cursor = conn.execute("INSERT INTO chats(customer_id,created_at,updated_at) VALUES(?,?,?)",
-                          (user["id"], stamp, stamp))
-    for dispatcher in conn.execute("SELECT id FROM users WHERE (role='admin' OR is_manager=1) AND active=1"):
-        notify_chat(conn, dispatcher["id"], cursor.lastrowid, "new_chat", f"Новый общий чат с {user['name']}")
+    cursor = conn.execute("INSERT INTO chats(customer_id,organization_id,created_at,updated_at) VALUES(?,?,?,?)",
+                          (user["id"], org["id"] if org else None, stamp, stamp))
+    for dispatcher in dispatcher_ids(conn):
+        notify_chat(conn, dispatcher, cursor.lastrowid, "new_chat", f"Новый общий чат с {org['name'] if org else user['name']}")
     return dict(chat_for(conn, cursor.lastrowid, user))
 
 
@@ -1333,22 +1897,177 @@ def get_chat(chat_id: int, desk_session: str | None = Cookie(default=None)):
     user = current_user(desk_session)
     with db() as conn:
         chat = chat_for(conn, chat_id, user)
-        messages = conn.execute("""SELECT m.id,m.body,m.created_at,m.author_id,u.name AS author_name
-            FROM chat_messages m JOIN users u ON u.id=m.author_id
-            WHERE m.chat_id=? ORDER BY m.id""", (chat_id,)).fetchall()
+        chat_id = chat["id"]
+        messages = conn.execute(f"{CHAT_MESSAGE_SELECT} WHERE m.chat_id=? ORDER BY m.id", (chat_id,)).fetchall()
+        scope = "s.organization_id=?" if chat["organization_id"] else "s.customer_id=? AND s.organization_id IS NULL"
+        scope_id = chat["organization_id"] or chat["customer_id"]
+        summaries = conn.execute(f"""{MEETING_SUMMARY_SELECT} WHERE {scope} AND s.ticket_id IS NULL
+            AND s.shared_at IS NOT NULL ORDER BY s.shared_at""", (scope_id,)).fetchall()
         linked = conn.execute("""SELECT l.source_message_id,t.id,t.title,t.status FROM chat_ticket_links l
             JOIN tickets t ON t.id=l.ticket_id WHERE l.chat_id=? ORDER BY l.id DESC""", (chat_id,)).fetchall()
         visible_links = []
         for row in linked:
             try:
-                ticket_for(conn, row["id"], user)
+                ticket_for(conn, row["id"], user, write=False)
                 visible_links.append(dict(row))
             except HTTPException:
                 continue
         files = conn.execute("""SELECT id,filename,size,content_type,author_id,chat_message_id,created_at
             FROM attachments WHERE chat_id=? ORDER BY id DESC""", (chat_id,)).fetchall()
-    return {"chat": dict(chat), "messages": [dict(row) for row in messages],
-            "linked_tickets": visible_links, "attachments": [dict(row) for row in files]}
+        service = []
+        if user["role"] != "customer":
+            service = conn.execute(f"{SERVICE_ENTRY_SELECT} WHERE s.is_billable=1 AND {scope} ORDER BY s.occurred_at DESC, s.id DESC LIMIT 30",
+                                   (scope_id,)).fetchall()
+        reads = read_state(conn, "chat", chat_id)
+        member_ids = chat_recipients(conn, chat)
+        participants = [dict(r) for r in conn.execute("SELECT id,name FROM users WHERE id IN (" +
+            ",".join("?" for _ in member_ids) + ") ORDER BY name", tuple(member_ids))]
+        return {"chat": customer_record(conn, chat, user), "participants": participants, "messages": [message_dict(row, user) for row in messages],
+            "linked_tickets": visible_links, "attachments": [customer_record(conn, row, user) for row in files],
+            "service_entries": [dict(row) for row in service],
+            "meeting_summaries": [customer_record(conn, row, user) for row in summaries], "read_state": reads}
+
+
+@app.post("/api/service-entries", status_code=201)
+def add_service_entry(data: ServiceEntryCreate, desk_session: str | None = Cookie(default=None)):
+    user = current_user(desk_session)
+    require_staff(user)
+    with db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        if data.request_id:
+            existing = conn.execute(f"{SERVICE_ENTRY_SELECT} WHERE s.author_id=? AND s.request_id=?",
+                                    (user["id"], data.request_id)).fetchone()
+            if existing:
+                return dict(existing)
+        customer = conn.execute("SELECT id FROM users WHERE id=? AND role='customer'", (data.customer_id,)).fetchone()
+        if not customer:
+            raise HTTPException(404, "Клиент не найден")
+        org = customer_organization(conn, data.customer_id)
+        if data.ticket_id is not None:
+            ticket = conn.execute("SELECT customer_id,organization_id,service_limit_minutes FROM tickets WHERE id=?", (data.ticket_id,)).fetchone()
+            same_client = ticket and (ticket["customer_id"] == data.customer_id or
+                                      (org is not None and ticket["organization_id"] == org["id"]))
+            if not same_client:
+                raise HTTPException(422, "Заявка не относится к этому клиенту")
+            membership = team_management.ticket_participation(conn,data.ticket_id,user["id"])
+            assigned = conn.execute("SELECT assignee_id FROM tickets WHERE id=?",(data.ticket_id,)).fetchone()[0]
+            if user["role"] == "employee" and not user["is_manager"] and assigned != user["id"] and membership in ("observer","reviewer"):
+                raise HTTPException(403,"Участник с доступом к просмотру не вносит платное сопровождение")
+            if ticket["service_limit_minutes"] is not None:
+                used = conn.execute("SELECT COALESCE(SUM(minutes),0) FROM service_entries WHERE is_billable=1 AND ticket_id=?", (data.ticket_id,)).fetchone()[0]
+                if used + data.minutes > ticket["service_limit_minutes"]:
+                    raise HTTPException(409, "Превышен лимит сопровождения. Согласуйте увеличение с клиентом")
+        note = data.note.strip()
+        if len(note) < 3:
+            raise HTTPException(422, "Опишите, что обсуждали")
+        stamp = now()
+        occurred = data.occurred_at.astimezone(timezone.utc).isoformat() if data.occurred_at else stamp
+        if occurred > stamp:
+            raise HTTPException(422, "Нельзя внести время за будущую дату")
+        summary, next_steps = data.summary.strip(), data.next_steps.strip()
+        if data.share and len(summary) < 3:
+            raise HTTPException(422, "Напишите, о чём договорились, чтобы отправить итоги клиенту")
+        cursor = conn.execute("""INSERT INTO service_entries(customer_id,organization_id,ticket_id,author_id,kind,minutes,
+            note,occurred_at,created_at,request_id,client_summary,client_next_steps) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (data.customer_id, org["id"] if org else None, data.ticket_id, user["id"], data.kind, data.minutes,
+             note, occurred, stamp, data.request_id, summary or None, next_steps or None))
+        if data.share:
+            share_meeting_summary(conn, cursor.lastrowid)
+        return dict(conn.execute(f"{SERVICE_ENTRY_SELECT} WHERE s.id=?", (cursor.lastrowid,)).fetchone())
+
+
+def share_meeting_summary(conn, entry_id):
+    """Публикует итоги встречи клиенту: в заявке, если запись к ней привязана, иначе в общем чате."""
+    entry = conn.execute("SELECT * FROM service_entries WHERE id=?", (entry_id,)).fetchone()
+    stamp = now()
+    first_time = entry["shared_at"] is None
+    conn.execute("UPDATE service_entries SET shared_at=COALESCE(shared_at,?) WHERE id=?", (stamp, entry_id))
+    if not first_time:
+        return
+    when = format_ru_date(entry["occurred_at"]).removesuffix(" г.")
+    label = {"call": "созвона", "meeting": "встречи"}.get(entry["kind"], "обсуждения")
+    if entry["ticket_id"] is not None:
+        ticket = conn.execute("SELECT * FROM tickets WHERE id=?", (entry["ticket_id"],)).fetchone()
+        for recipient in customer_recipients(conn, ticket):
+            notify(conn, recipient, ticket["id"], "meeting_summary", f"Итоги {label} {when} по заявке №{ticket['id']}")
+        realtime_bus.broadcast(customer_recipients(conn, ticket), {"type": "meeting_summary", "ticket_id": ticket["id"]})
+        return
+    customer = conn.execute("SELECT * FROM users WHERE id=?", (entry["customer_id"],)).fetchone()
+    if entry["organization_id"] is not None:
+        chat_id = company_chat.sync_organization(conn, entry["organization_id"])
+        if not chat_id:
+            chat_id = conn.execute("INSERT INTO chats(customer_id,organization_id,created_at,updated_at) VALUES(?,?,?,?)",
+                                   (entry["customer_id"], entry["organization_id"], stamp, stamp)).lastrowid
+        chat = conn.execute(company_chat.SELECT + " WHERE c.id=?", (chat_id,)).fetchone()
+    else:
+        chat = create_chat_service(conn, customer)
+        chat_id = chat["id"]
+    conn.execute("UPDATE chats SET updated_at=? WHERE id=?", (stamp, chat_id))
+    for recipient in chat_recipients(conn, chat):
+        notify_chat(conn, recipient, chat_id, "meeting_summary", f"Итоги {label} {when}")
+    realtime_bus.broadcast(chat_recipients(conn, chat) | dispatcher_ids(conn) | ({chat["assignee_id"]} - {None}),
+                           {"type": "meeting_summary", "chat_id": chat_id})
+
+
+
+@app.patch("/api/service-entries/{entry_id}/summary")
+def update_meeting_summary(entry_id: int, data: MeetingSummaryUpdate, desk_session: str | None = Cookie(default=None)):
+    user = current_user(desk_session)
+    require_staff(user)
+    summary = data.summary.strip()
+    if len(summary) < 3:
+        raise HTTPException(422, "Напишите, о чём договорились")
+    with db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute("SELECT author_id,is_billable FROM service_entries WHERE id=?", (entry_id,)).fetchone()
+        if not row:
+            raise HTTPException(404, "Запись не найдена")
+        if "is_billable" in row.keys() and not row["is_billable"]:
+            raise HTTPException(409, "Опубликованные итоги встречи сохраняются в истории")
+        if row["author_id"] != user["id"] and user["role"] != "admin" and not user["is_manager"]:
+            raise HTTPException(403, "Итоги добавляет автор записи или руководитель")
+        conn.execute("UPDATE service_entries SET client_summary=?,client_next_steps=? WHERE id=?",
+                     (summary, data.next_steps.strip() or None, entry_id))
+        if data.share:
+            share_meeting_summary(conn, entry_id)
+        return dict(conn.execute(f"{SERVICE_ENTRY_SELECT} WHERE s.id=?", (entry_id,)).fetchone())
+
+
+@app.get("/api/service-entries")
+def list_service_entries(client_type: Literal["org", "user"] | None = None, client_id: int | None = None,
+                         unbilled: bool = False, desk_session: str | None = Cookie(default=None)):
+    user = current_user(desk_session)
+    require_staff(user)
+    with db() as conn:
+        conds, params = ["s.is_billable=1"], []
+        if client_type and client_id is not None:
+            cond, cond_params = client_condition(client_type, client_id, "s.")
+            conds.append(cond)
+            params.extend(cond_params)
+        if unbilled:
+            conds.append("s.act_invoice_id IS NULL")
+        where = f" WHERE {' AND '.join(conds)}" if conds else ""
+        rows = conn.execute(f"{SERVICE_ENTRY_SELECT}{where} ORDER BY s.occurred_at DESC, s.id DESC LIMIT 200",
+                            params).fetchall()
+        return [dict(row) for row in rows]
+
+
+@app.delete("/api/service-entries/{entry_id}")
+def delete_service_entry(entry_id: int, desk_session: str | None = Cookie(default=None)):
+    user = current_user(desk_session)
+    require_staff(user)
+    with db() as conn:
+        row = conn.execute("SELECT author_id,act_invoice_id,is_billable FROM service_entries WHERE id=?", (entry_id,)).fetchone()
+        if not row:
+            raise HTTPException(404, "Запись не найдена")
+        if "is_billable" in row.keys() and not row["is_billable"]:
+            raise HTTPException(409, "Опубликованные итоги встречи сохраняются в истории")
+        if row["author_id"] != user["id"] and user["role"] != "admin" and not user["is_manager"]:
+            raise HTTPException(403, "Удалить запись может её автор или руководитель")
+        if row["act_invoice_id"] is not None:
+            raise HTTPException(409, "Запись уже включена в акт")
+        conn.execute("DELETE FROM service_entries WHERE id=?", (entry_id,))
+        return {"ok": True}
 
 
 @app.post("/api/chats/{chat_id}/tickets", status_code=201)
@@ -1357,11 +2076,13 @@ def ticket_from_chat(chat_id: int, data: ChatTicketCreate, desk_session: str | N
     require_staff(user)
     with db() as conn:
         chat = chat_for(conn, chat_id, user)
+        chat_id = chat["id"]
         message = conn.execute("SELECT id,body,author_id FROM chat_messages WHERE id=? AND chat_id=?",
                                (data.message_id, chat_id)).fetchone()
         if not message:
             raise HTTPException(404, "Сообщение не найдено")
-        if message["author_id"] != chat["customer_id"]:
+        author = conn.execute("SELECT * FROM users WHERE id=?", (message["author_id"],)).fetchone()
+        if author["role"] != "customer":
             raise HTTPException(422, "Выберите сообщение заказчика")
         existing = conn.execute("SELECT ticket_id FROM chat_ticket_links WHERE chat_id=? AND source_message_id=?",
                                 (chat_id, data.message_id)).fetchone()
@@ -1371,10 +2092,10 @@ def ticket_from_chat(chat_id: int, data: ChatTicketCreate, desk_session: str | N
         if not title:
             raise HTTPException(422, "Укажите тему")
         stamp = now()
-        org = customer_organization(conn, chat["customer_id"])
+        org = conn.execute("SELECT id FROM organizations WHERE id=?", (chat["organization_id"],)).fetchone()
         cursor = conn.execute("""INSERT INTO tickets(customer_id,assignee_id,created_by_id,title,description,status,
             created_at,updated_at,organization_id,visibility,response_due_at,estimate_due_at)
-            VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""", (chat["customer_id"], chat["assignee_id"], user["id"], title,
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""", (message["author_id"], chat["assignee_id"], user["id"], title,
                 message["body"], "new", stamp, stamp, org["id"] if org else None,
                 "organization" if org else "private", (datetime.now(timezone.utc)+timedelta(hours=24)).isoformat(),
                 (datetime.now(timezone.utc)+timedelta(days=3)).isoformat()))
@@ -1383,8 +2104,9 @@ def ticket_from_chat(chat_id: int, data: ChatTicketCreate, desk_session: str | N
             WHERE chat_id=? AND chat_message_id=?""", (cursor.lastrowid, stamp, chat_id, data.message_id))
         conn.execute("""INSERT INTO chat_ticket_links(chat_id,ticket_id,source_message_id,created_by,created_at)
             VALUES(?,?,?,?,?)""", (chat_id, cursor.lastrowid, data.message_id, user["id"], stamp))
-        notify_chat(conn, chat["customer_id"], chat_id, "ticket_created",
-                    f"Из общего чата создана заявка №{cursor.lastrowid}: {title}")
+        for recipient in chat_recipients(conn, chat):
+            notify_chat(conn, recipient, chat_id, "ticket_created",
+                        f"Из общего чата создана заявка №{cursor.lastrowid}: {title}")
         if chat["assignee_id"]:
             notify(conn, chat["assignee_id"], cursor.lastrowid, "new_ticket", f"Новая заявка №{cursor.lastrowid}: {title}")
         else:
@@ -1399,6 +2121,7 @@ def assign_chat(chat_id: int, data: Assignment, desk_session: str | None = Cooki
     require_dispatcher(user)
     with db() as conn:
         chat = chat_for(conn, chat_id, user)
+        chat_id = chat["id"]
         if data.assignee_id is not None:
             target = conn.execute("SELECT id FROM users WHERE id=? AND role IN ('employee','admin') AND active=1",
                                   (data.assignee_id,)).fetchone()
@@ -1407,7 +2130,7 @@ def assign_chat(chat_id: int, data: Assignment, desk_session: str | None = Cooki
         conn.execute("UPDATE chats SET assignee_id=?,updated_at=? WHERE id=?", (data.assignee_id, now(), chat_id))
         if data.assignee_id and data.assignee_id != chat["assignee_id"]:
             notify_chat(conn, data.assignee_id, chat_id, "assignment", f"Вам назначен общий чат с {chat['customer_name']}")
-        return dict(chat_for(conn, chat_id, user))
+        return customer_record(conn, chat_for(conn, chat_id, user), user)
 
 
 @app.post("/api/chats/{chat_id}/messages", status_code=201)
@@ -1423,44 +2146,44 @@ def add_chat_message_service(conn, user, chat_id: int, data: MessageCreate):
     if not body:
         raise HTTPException(422, "Введите сообщение")
     chat = chat_for(conn, chat_id, user)
-    existing = conn.execute("""SELECT m.id,m.body,m.created_at,m.author_id,u.name AS author_name
-        FROM chat_messages m JOIN users u ON u.id=m.author_id
-        WHERE m.chat_id=? AND m.author_id=? AND m.request_id=?""",
-        (chat_id, user["id"], data.request_id)).fetchone()
+    chat_id = chat["id"]
+    existing = conn.execute(f"{CHAT_MESSAGE_SELECT} WHERE m.chat_id=? AND m.author_id=? AND m.request_id=?",
+                            (chat_id, user["id"], data.request_id)).fetchone()
     if existing:
-        return dict(existing)
+        return message_dict(existing, user)
+    reply_to = checked_reply(conn, "chat_messages", "chat_id", chat_id, data.reply_to_id)
     stamp = now()
-    cursor = conn.execute("INSERT INTO chat_messages(chat_id,author_id,body,request_id,created_at) VALUES(?,?,?,?,?)",
-                          (chat_id, user["id"], body, data.request_id, stamp))
+    cursor = conn.execute("INSERT INTO chat_messages(chat_id,author_id,body,request_id,created_at,reply_to_id) VALUES(?,?,?,?,?,?)",
+                          (chat_id, user["id"], body, data.request_id, stamp, reply_to))
     conn.execute("UPDATE chats SET updated_at=? WHERE id=?", (stamp, chat_id))
-    if user["role"] == "customer":
-        if chat["assignee_id"]:
-            notify_chat(conn, chat["assignee_id"], chat_id, "message", f"Новое сообщение в общем чате с {user['name']}")
-        else:
-            for dispatcher in conn.execute("SELECT id FROM users WHERE (role='admin' OR is_manager=1) AND active=1"):
-                notify_chat(conn, dispatcher["id"], chat_id, "message", f"Новое сообщение в общем чате с {user['name']}")
-    else:
-        notify_chat(conn, chat["customer_id"], chat_id, "message", "Новое сообщение в общем чате")
-    message_payload = {"id": cursor.lastrowid, "body": body, "created_at": stamp,
-                       "author_id": user["id"], "author_name": user["name"]}
-    chat_participants = {chat["customer_id"]}
+    mark_read(conn, "chat", chat_id, user["id"], cursor.lastrowid)
+    for recipient in chat_message_recipients(conn, chat, user):
+        notify_chat(conn, recipient, chat_id, "message", "Новое сообщение в общем чате" if user["role"] != "customer" else f"Новое сообщение в общем чате: {user['name']}")
+    message_payload = message_dict(conn.execute(f"{CHAT_MESSAGE_SELECT} WHERE m.id=?", (cursor.lastrowid,)).fetchone())
+    chat_participants = chat_recipients(conn, chat)
     if chat["assignee_id"]:
         chat_participants.add(chat["assignee_id"])
     for dispatcher in conn.execute("SELECT id FROM users WHERE (role='admin' OR is_manager=1) AND active=1"):
         chat_participants.add(dispatcher["id"])
-    realtime_bus.broadcast(chat_participants, {
-        "type": "chat_message", "chat_id": chat_id, "message": message_payload
-    })
-    return message_payload
+    for recipient_id in chat_participants:
+        viewer = conn.execute("SELECT role FROM users WHERE id=?", (recipient_id,)).fetchone()
+        if viewer:
+            realtime_bus.publish(recipient_id, {
+                "type": "chat_message", "chat_id": chat_id,
+                "message": message_dict(message_payload, viewer)
+            })
+    return message_dict(message_payload, user)
 
 
 @app.get("/api/staff")
-def staff(desk_session: str | None = Cookie(default=None)):
+def staff(desk_session: str | None = Cookie(default=None), include_inactive: bool = False):
     user = current_user(desk_session)
     require_staff(user)
+    if include_inactive:
+        require_admin(user)
     with db() as conn:
         if user["role"] == "admin" or user["is_manager"]:
-            rows = conn.execute("SELECT id,name,email,role,is_manager FROM users WHERE role IN ('employee','admin') AND active=1 ORDER BY name").fetchall()
+            rows = conn.execute("SELECT id,name,email,role,is_manager,active FROM users WHERE role IN ('employee','admin') AND (active=1 OR ?) ORDER BY name", (include_inactive,)).fetchall()
         else:
             rows = conn.execute("SELECT id,name,email,role,is_manager FROM users WHERE id=?", (user["id"],)).fetchall()
         return [{**dict(row), **staff_profile(conn, row)} for row in rows]
@@ -1472,10 +2195,70 @@ def add_staff(data: StaffCreate, desk_session: str | None = Cookie(default=None)
     require_admin(user)
     with db() as conn:
         created = create_user(conn, data.name, data.email, data.password, "employee")
+        codes = set(data.functions) | ({data.team_role} if data.team_role else set())
+        if any(not conn.execute("SELECT 1 FROM team_functions WHERE code=? AND active=1", (code,)).fetchone() for code in codes):
+            raise HTTPException(422, "Неизвестная функция команды")
+        conn.execute("UPDATE users SET team_role=? WHERE id=?", (data.team_role, created["id"]))
+        conn.execute("INSERT INTO staff_settings(user_id,updated_at) VALUES(?,?)", (created["id"],now()))
+        conn.executemany("INSERT INTO staff_functions VALUES(?,?)", [(created["id"],code) for code in codes])
         if data.staff_role == "manager":
             conn.execute("UPDATE users SET is_manager=1 WHERE id=?", (created["id"],))
-            created = conn.execute("SELECT * FROM users WHERE id=?", (created["id"],)).fetchone()
-        return public_user(created)
+        created = conn.execute("SELECT * FROM users WHERE id=?", (created["id"],)).fetchone()
+    return public_user(created)
+
+
+@app.patch("/api/staff/{staff_id}/team-role")
+def update_staff_team_role(staff_id: int, data: StaffTeamRoleUpdate, desk_session: str | None = Cookie(default=None)):
+    require_admin(current_user(desk_session))
+    with db() as conn:
+        person = conn.execute("SELECT * FROM users WHERE id=? AND role IN ('employee','admin')", (staff_id,)).fetchone()
+        if not person:
+            raise HTTPException(404, "Сотрудник не найден")
+        conn.execute("DELETE FROM staff_functions WHERE user_id=? AND function_code IN ('programmer','integrator','devops')", (staff_id,))
+        if data.team_role:
+            conn.execute("INSERT OR IGNORE INTO staff_functions VALUES(?,?)", (staff_id,data.team_role))
+        conn.execute("UPDATE staff_settings SET updated_at=? WHERE user_id=?", (now(),staff_id))
+        conn.execute("UPDATE users SET team_role=? WHERE id=?", (data.team_role, staff_id))
+        person = conn.execute("SELECT * FROM users WHERE id=?", (staff_id,)).fetchone()
+        return {**public_user(person), **staff_profile(conn, person)}
+
+
+@app.patch("/api/staff/{staff_id}/availability")
+def change_staff_availability(staff_id: int, data: StaffAvailability, desk_session: str | None = Cookie(default=None)):
+    user = current_user(desk_session)
+    require_admin(user)
+    with db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        target = conn.execute("SELECT * FROM users WHERE id=? AND role IN ('employee','admin')", (staff_id,)).fetchone()
+        if not target:
+            raise HTTPException(404, "Сотрудник не найден")
+        if not data.active and staff_id == user["id"]:
+            raise HTTPException(409, "Нельзя отключить собственный доступ")
+        if data.replacement_id is not None and (data.replacement_id == staff_id or not conn.execute(
+            "SELECT 1 FROM users WHERE id=? AND role IN ('employee','admin') AND active=1", (data.replacement_id,)).fetchone()):
+            raise HTTPException(422, "Выберите другого активного сотрудника")
+        moved = 0
+        moved_chats = 0
+        if not data.active or data.transfer_work:
+            tickets = conn.execute("SELECT id FROM tickets WHERE assignee_id=? AND status!='closed'", (staff_id,)).fetchall()
+            for ticket in tickets:
+                conn.execute("UPDATE tickets SET assignee_id=?,updated_at=? WHERE id=?", (data.replacement_id, now(), ticket["id"]))
+                conn.execute("INSERT INTO ticket_events(ticket_id,actor_id,kind,old_value,new_value,created_at) VALUES(?,?,?,?,?,?)",
+                             (ticket["id"], user["id"], "assignment", str(staff_id), str(data.replacement_id or ""), now()))
+                for recipient in ({data.replacement_id} if data.replacement_id else dispatcher_ids(conn)) - {staff_id}:
+                    notify(conn, recipient, ticket["id"], "assignment", f"Заявка №{ticket['id']} передана после отключения сотрудника")
+            moved = len(tickets)
+            chats = conn.execute("SELECT id FROM chats WHERE assignee_id=?", (staff_id,)).fetchall()
+            conn.execute("UPDATE chats SET assignee_id=?,updated_at=? WHERE assignee_id=?", (data.replacement_id, now(), staff_id))
+            for chat in chats:
+                for recipient in ({data.replacement_id} if data.replacement_id else dispatcher_ids(conn)) - {staff_id}:
+                    notify_chat(conn, recipient, chat["id"], "assignment", "Общий чат передан после отключения сотрудника")
+            moved_chats = len(chats)
+            team_management.handover(conn, sys.modules[__name__], user, staff_id, data.replacement_id)
+            if not data.active:
+                conn.execute("DELETE FROM sessions WHERE user_id=?", (staff_id,))
+        conn.execute("UPDATE users SET active=? WHERE id=?", (data.active, staff_id))
+        return {"id": staff_id, "active": data.active, "transferred_tickets": moved, "transferred_chats": moved_chats}
 
 
 @app.get("/api/customers")
@@ -1483,13 +2266,18 @@ def customers(desk_session: str | None = Cookie(default=None)):
     user = current_user(desk_session)
     require_staff(user)
     with db() as conn:
+        select = """SELECT id,name,email,
+            (NOT EXISTS (SELECT 1 FROM organization_members m WHERE m.user_id=users.id)
+             AND (must_change_credentials=0 OR temporary_credentials_expires_at>?)
+             AND NOT EXISTS (SELECT 1 FROM account_tokens a WHERE a.user_id=users.id AND a.kind='invite')) AS can_own_company
+             FROM users WHERE role='customer' AND active=1"""
         if user["role"] == "admin" or user["is_manager"]:
-            rows = conn.execute("SELECT id,name,email FROM users WHERE role='customer' AND active=1 ORDER BY name,email").fetchall()
+            rows = conn.execute(select + " ORDER BY name,email", (now(),)).fetchall()
         else:
-            rows = conn.execute("""SELECT id,name,email FROM users WHERE role='customer' AND active=1
-                AND (id IN (SELECT customer_id FROM tickets WHERE assignee_id=?)
-                  OR id IN (SELECT customer_id FROM chats WHERE assignee_id=?)) ORDER BY name,email""",
-                (user["id"], user["id"])).fetchall()
+            rows = conn.execute(select + """ AND (id IN (SELECT customer_id FROM tickets WHERE assignee_id=?)
+                  OR id IN (SELECT customer_id FROM chats WHERE assignee_id=? AND organization_id IS NULL)
+                  OR id IN (SELECT m.user_id FROM organization_members m JOIN chats c ON c.organization_id=m.organization_id WHERE c.assignee_id=?)) ORDER BY name,email""",
+                (now(), user["id"], user["id"], user["id"])).fetchall()
     return [dict(row) for row in rows]
 
 
@@ -1507,7 +2295,7 @@ def tickets(desk_session: str | None = Cookie(default=None)):
         if user["role"] == "customer":
             rows = conn.execute(sql + " WHERE (t.customer_id=? AND t.visibility!='organization') OR (t.visibility='organization' AND t.organization_id IN (SELECT organization_id FROM organization_members WHERE user_id=?)) ORDER BY t.updated_at DESC,t.id DESC", (user["id"], user["id"])).fetchall()
         elif user["role"] == "employee" and not user["is_manager"]:
-            rows = conn.execute(sql + " WHERE t.assignee_id=? ORDER BY t.updated_at DESC,t.id DESC", (user["id"],)).fetchall()
+            rows = conn.execute(sql + " WHERE t.assignee_id=? OR t.id IN (SELECT ticket_id FROM ticket_participants WHERE user_id=?) ORDER BY t.updated_at DESC,t.id DESC", (user["id"], user["id"])).fetchall()
         else:
             rows = conn.execute(sql + " ORDER BY t.updated_at DESC,t.id DESC").fetchall()
         result = []
@@ -1518,10 +2306,15 @@ def tickets(desk_session: str | None = Cookie(default=None)):
             item["effort_minutes"] = estimate["effort_minutes"] if estimate else None
             item["approved_minutes"] = approved_minutes(conn, row["id"])
             item["actual_minutes"] = actual_minutes(conn, row["id"])
+            if user["role"] != "customer":
+                item.update(contractor_time_summary(conn, row["id"], item["actual_minutes"]))
             item["pending_hour_request"] = bool(conn.execute("SELECT 1 FROM hour_requests WHERE ticket_id=? AND state='pending'", (row["id"],)).fetchone())
+            item["has_available_owner"] = bool(available_owners(conn, row["organization_id"])) if row["organization_id"] else None
             if user["role"] == "customer":
-                item["next_step"] = customer_next_step(item, estimate)
-            result.append(item)
+                item["next_step"] = customer_next_step(item, estimate, conn, user)
+                item["can_decide"] = customer_can_decide(conn, row, user)
+                item["can_write"] = customer_can_write_ticket(conn, row, user)
+            result.append(customer_record(conn, item, user))
     return result
 
 
@@ -1536,14 +2329,18 @@ def work_queue(desk_session: str | None = Cookie(default=None)):
             (SELECT author_id FROM messages WHERE ticket_id=t.id ORDER BY id DESC LIMIT 1) AS last_author_id,
             (SELECT state FROM estimates WHERE ticket_id=t.id ORDER BY version DESC LIMIT 1) AS estimate_state,
             (SELECT effort_minutes FROM estimates WHERE ticket_id=t.id ORDER BY version DESC LIMIT 1) AS effort_minutes,
-            (SELECT 1 FROM hour_requests WHERE ticket_id=t.id AND state='pending' LIMIT 1) AS pending_hours
+            (SELECT 1 FROM hour_requests WHERE ticket_id=t.id AND state='pending' LIMIT 1) AS pending_hours,
+            (SELECT MAX(count) FROM customer_reminders WHERE ticket_id=t.id
+                AND kind=CASE t.status WHEN 'waiting' THEN 'answer' WHEN 'done' THEN 'acceptance' END) AS reminders_sent
             FROM tickets t JOIN users c ON c.id=t.customer_id LEFT JOIN users a ON a.id=t.assignee_id
-            WHERE t.status!='closed' AND (?=1 OR t.assignee_id=?)""",
-            (int(user["role"] == "admin" or user["is_manager"]), user["id"])).fetchall()
+            WHERE t.status!='closed' AND (?=1 OR t.assignee_id=? OR EXISTS (SELECT 1 FROM ticket_participants p WHERE p.ticket_id=t.id AND p.user_id=?))""",
+            (int(user["role"] == "admin" or user["is_manager"]), user["id"], user["id"])).fetchall()
         chat_rows = conn.execute("""SELECT c.id,c.customer_id,c.assignee_id,c.updated_at,
-            u.name AS customer_name,a.name AS assignee_name,
-            (SELECT author_id FROM chat_messages WHERE chat_id=c.id ORDER BY id DESC LIMIT 1) AS last_author_id
+            COALESCE(o.name,u.name) AS customer_name,a.name AS assignee_name,
+            (SELECT author_id FROM chat_messages WHERE chat_id=c.id ORDER BY id DESC LIMIT 1) AS last_author_id,
+            (SELECT u.role FROM chat_messages m JOIN users u ON u.id=m.author_id WHERE m.chat_id=c.id ORDER BY m.id DESC LIMIT 1) AS last_author_role
             FROM chats c JOIN users u ON u.id=c.customer_id LEFT JOIN users a ON a.id=c.assignee_id
+            LEFT JOIN organizations o ON o.id=c.organization_id
             WHERE (?=1 OR c.assignee_id=?)""",
             (int(user["role"] == "admin" or user["is_manager"]), user["id"])).fetchall()
     items = []
@@ -1564,6 +2361,10 @@ def work_queue(desk_session: str | None = Cookie(default=None)):
             action, priority = "Ожидаем приёмки результата", 3
         else:
             action, priority = "Продолжить работу", 2
+        if priority >= 2 and (row["reminders_sent"] or 0) >= reminder_settings()["max"]:
+            action = ("Заказчик не принимает работу — уточните или закройте" if row["status"] == "done"
+                      else "Заказчик молчит — предложите закрыть заявку")
+            priority = 2
         due_candidates = []
         if row["first_staff_response_at"] is None and row["response_due_at"]:
             due_candidates.append((row["response_due_at"], "Ответить заказчику"))
@@ -1584,7 +2385,7 @@ def work_queue(desk_session: str | None = Cookie(default=None)):
     for row in chat_rows:
         if row["assignee_id"] is None:
             action, priority = "Назначить ответственного", 0
-        elif row["last_author_id"] == row["customer_id"]:
+        elif row["last_author_role"] == "customer":
             action, priority = "Ответить заказчику", 1
         else:
             action, priority = "Ожидаем ответа заказчика", 3
@@ -1607,7 +2408,7 @@ def add_ticket_service(conn, user, data: TicketCreate):
     if not data.title.strip() or not data.description.strip():
         raise HTTPException(422, "Заполните тему и описание")
     if user["role"] == "customer":
-        if data.customer_id is not None or data.assignee_id is not None:
+        if data.customer_id is not None or data.assignee_id is not None or data.effort_minutes is not None:
             raise HTTPException(403, "Недостаточно прав")
         customer_id, assignee_id = user["id"], None
     else:
@@ -1619,8 +2420,10 @@ def add_ticket_service(conn, user, data: TicketCreate):
             raise HTTPException(422, "Заказчик не найден")
         if user["role"] == "employee" and not user["is_manager"]:
             accessible = conn.execute("""SELECT 1 FROM tickets WHERE customer_id=? AND assignee_id=?
-                UNION SELECT 1 FROM chats WHERE customer_id=? AND assignee_id=? LIMIT 1""",
-                (data.customer_id, user["id"], data.customer_id, user["id"])).fetchone()
+                UNION SELECT 1 FROM chats WHERE assignee_id=? AND
+                ((organization_id IS NULL AND customer_id=?) OR organization_id IN
+                 (SELECT organization_id FROM organization_members WHERE user_id=?)) LIMIT 1""",
+                (data.customer_id, user["id"], user["id"], data.customer_id, data.customer_id)).fetchone()
             if not accessible:
                 raise HTTPException(403, "Нет доступа к этому заказчику")
             if data.assignee_id not in (None, user["id"]):
@@ -1633,6 +2436,8 @@ def add_ticket_service(conn, user, data: TicketCreate):
             ).fetchone():
                 raise HTTPException(422, "Сотрудник не найден")
         customer_id = data.customer_id
+        if data.effort_minutes is not None and assignee_id is None:
+            raise HTTPException(422, "Чтобы сразу отправить оценку, назначьте ответственного")
     organization = customer_organization(conn, customer_id)
     if data.visibility == "organization" and not organization:
         raise HTTPException(422, "Заказчик не состоит в организации")
@@ -1648,18 +2453,30 @@ def add_ticket_service(conn, user, data: TicketCreate):
          organization["id"] if organization else None, data.visibility, response_due, estimate_due, data.service_type))
     if user["role"] != "customer":
         conn.execute("UPDATE tickets SET first_staff_response_at=? WHERE id=?", (stamp, cursor.lastrowid))
+    auto_approved = False
+    if data.effort_minutes is not None:
+        estimate = conn.execute("""INSERT INTO estimates(ticket_id,author_id,version,amount_minor,
+            assessment_minutes,note,state,created_at,effort_minutes) VALUES(?,?,?,?,?,?,?,?,?)""",
+            (cursor.lastrowid, user["id"], 1, 0, data.assessment_minutes or 1,
+             data.estimate_note.strip(), "pending", stamp, data.effort_minutes))
+        auto_approved = auto_approve_estimate(conn, cursor.lastrowid, customer_id, estimate.lastrowid, data.effort_minutes)
     if user["role"] == "customer":
         for admin in conn.execute("SELECT id FROM users WHERE (role='admin' OR is_manager=1) AND active=1"):
             notify(conn, admin["id"], cursor.lastrowid, "new_ticket", f"Новая заявка №{cursor.lastrowid}: {data.title.strip()}")
     else:
-        notify(conn, customer_id, cursor.lastrowid, "new_ticket",
-               f"Для вас создана заявка №{cursor.lastrowid}: {data.title.strip()}")
+        text = f"Для вас создана заявка №{cursor.lastrowid}: {data.title.strip()}"
+        if auto_approved:
+            text += f". Оценка {fmt_hours(data.effort_minutes)} одобрена автоматически по вашему лимиту"
+        elif data.effort_minutes is not None:
+            text += f". Согласуйте оценку: {fmt_hours(data.effort_minutes)}"
+        notify(conn, customer_id, cursor.lastrowid, "estimate" if data.effort_minutes is not None else "new_ticket", text)
         if assignee_id and assignee_id != user["id"]:
-            notify(conn, assignee_id, cursor.lastrowid, "assignment", f"Вам назначена заявка №{cursor.lastrowid}")
+            notify(conn, assignee_id, cursor.lastrowid, "assignment", f"Вам назначена заявка №{cursor.lastrowid}"
+                   + (" — оценка уже одобрена, можно начинать" if auto_approved else ""))
         if assignee_id is None:
             for admin in conn.execute("SELECT id FROM users WHERE (role='admin' OR is_manager=1) AND active=1 AND id!=?", (user["id"],)):
                 notify(conn, admin["id"], cursor.lastrowid, "new_ticket", f"Новая заявка №{cursor.lastrowid}: {data.title.strip()}")
-    result = ticket_dict(ticket_for(conn, cursor.lastrowid, user))
+    result = customer_record(conn, ticket_for(conn, cursor.lastrowid, user), user)
     dispatch_webhooks("ticket.created", {
         "event": "ticket.created",
         "ticket_id": cursor.lastrowid,
@@ -1672,13 +2489,50 @@ def add_ticket_service(conn, user, data: TicketCreate):
     return result
 
 
+@app.patch("/api/tickets/{ticket_id}/service-budget")
+def update_service_budget(ticket_id: int, data: ServiceBudgetUpdate, desk_session: str | None = Cookie(default=None)):
+    user = current_user(desk_session)
+    with db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        ticket = ticket_for(conn, ticket_id, user)
+        if user["role"] != "customer" or not customer_can_decide(conn, ticket, user):
+            raise HTTPException(403, "Лимит сопровождения устанавливает заказчик, согласующий работу")
+        if ticket["status"] == "closed":
+            raise HTTPException(409, "Заявка закрыта")
+        used = conn.execute("SELECT COALESCE(SUM(minutes),0) FROM service_entries WHERE is_billable=1 AND ticket_id=?", (ticket_id,)).fetchone()[0]
+        if data.limit_minutes is not None and data.limit_minutes < used:
+            raise HTTPException(409, "Лимит не может быть меньше уже учтённого сопровождения")
+        conn.execute("UPDATE tickets SET service_limit_minutes=? WHERE id=?", (data.limit_minutes, ticket_id))
+        conn.execute("INSERT INTO ticket_events(ticket_id,actor_id,kind,new_value,created_at) VALUES(?,?,?,?,?)", (ticket_id,user["id"],"service_budget",str(data.limit_minutes) if data.limit_minutes is not None else "unlimited",now()))
+        if ticket["assignee_id"]:
+            notify(conn, ticket["assignee_id"], ticket_id, "budget", "Заказчик изменил лимит сопровождения")
+        return {"limit_minutes": data.limit_minutes}
+
+
+@app.post("/api/tickets/{ticket_id}/owner-help")
+def request_owner_help(ticket_id: int, desk_session: str | None = Cookie(default=None)):
+    user = current_user(desk_session)
+    with db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        ticket = ticket_for(conn, ticket_id, user)
+        if ticket["visibility"] != "organization" or available_owners(conn, ticket["organization_id"]):
+            raise HTTPException(409, "Для заявки доступно согласование")
+        recent = conn.execute("SELECT 1 FROM ticket_events WHERE ticket_id=? AND kind='owner_help' AND created_at>?", (ticket_id,(datetime.now(timezone.utc)-timedelta(hours=24)).isoformat())).fetchone()
+        if not recent:
+            for dispatcher in conn.execute("SELECT id FROM users WHERE active=1 AND (role='admin' OR is_manager=1)"):
+                notify(conn,dispatcher['id'],ticket_id,'owner_help',f"Нужно восстановить владельца компании для заявки №{ticket_id}")
+            conn.execute("INSERT INTO ticket_events(ticket_id,actor_id,kind,created_at) VALUES(?,?,?,?)", (ticket_id,user['id'],'owner_help',now()))
+        return {"message": "Запрос передан менеджеру. Он назначит владельца или восстановит его доступ"}
+
+
 @app.get("/api/tickets/{ticket_id}")
 def get_ticket(ticket_id: int, desk_session: str | None = Cookie(default=None)):
     user = current_user(desk_session)
     with db() as conn:
-        ticket = ticket_for(conn, ticket_id, user)
-        messages = conn.execute("""SELECT m.id,m.body,m.created_at,m.author_id,u.name AS author_name,u.role AS author_role
-            FROM messages m JOIN users u ON u.id=m.author_id WHERE ticket_id=? ORDER BY m.id""", (ticket_id,)).fetchall()
+        ticket = ticket_for(conn, ticket_id, user, write=False)
+        messages = conn.execute(f"{TICKET_MESSAGE_SELECT} WHERE m.ticket_id=? ORDER BY m.id", (ticket_id,)).fetchall()
+        summaries = conn.execute(f"{MEETING_SUMMARY_SELECT} WHERE s.ticket_id=? AND s.shared_at IS NOT NULL ORDER BY s.shared_at",
+                                 (ticket_id,)).fetchall()
         events = conn.execute("""SELECT e.*,u.name AS actor_name FROM ticket_events e JOIN users u ON u.id=e.actor_id
             WHERE ticket_id=? ORDER BY e.id""", (ticket_id,)).fetchall()
         estimates = conn.execute("""SELECT e.*,u.name AS author_name FROM estimates e JOIN users u ON u.id=e.author_id
@@ -1690,8 +2544,18 @@ def get_ticket(ticket_id: int, desk_session: str | None = Cookie(default=None)):
             except HTTPException:
                 linked = None
         item = ticket_dict(ticket)
+        if user["role"] != "customer":
+            membership = team_management.ticket_participation(conn, ticket_id, user["id"])
+            item["participation"] = membership
+            item["can_write"] = (user["role"] == "admin" or bool(user["is_manager"]) or ticket["assignee_id"] == user["id"]
+                                 or (membership == "executor" and team_management.has_permission(conn, user, "tasks")))
+            item["participants"] = [dict(r) for r in conn.execute("SELECT p.user_id,p.participation,u.name FROM ticket_participants p JOIN users u ON u.id=p.user_id WHERE p.ticket_id=?", (ticket_id,))]
+        item["estimate_state"] = estimates[0]["state"] if estimates else None
+        item["effort_minutes"] = estimates[0]["effort_minutes"] if estimates else None
         item["approved_minutes"] = approved_minutes(conn, ticket_id)
         item["actual_minutes"] = actual_minutes(conn, ticket_id)
+        if user["role"] != "customer":
+            item.update(contractor_time_summary(conn, ticket_id, item["actual_minutes"]))
         item["pending_hour_request"] = bool(conn.execute("SELECT 1 FROM hour_requests WHERE ticket_id=? AND state='pending'", (ticket_id,)).fetchone())
 
         client_org = customer_organization(conn, ticket["customer_id"])
@@ -1713,19 +2577,40 @@ def get_ticket(ticket_id: int, desk_session: str | None = Cookie(default=None)):
             if act_row:
                 act_info = dict(act_row)
         item["act_invoice"] = act_info
+        item["has_available_owner"] = bool(available_owners(conn, ticket["organization_id"])) if ticket["organization_id"] else None
 
         if user["role"] == "customer":
-            item["next_step"] = customer_next_step(item, estimates[0] if estimates else None)
+            item["pending_hour_request"] = bool(conn.execute("SELECT 1 FROM hour_requests WHERE ticket_id=? AND state='pending'", (ticket_id,)).fetchone())
+            item["next_step"] = customer_next_step(item, estimates[0] if estimates else None, conn, user)
         time_rows = conn.execute("""SELECT w.*,u.name AS author_name FROM time_entries w JOIN users u ON u.id=w.author_id
             WHERE w.ticket_id=? ORDER BY w.id DESC""", (ticket_id,)).fetchall()
         hour_rows = conn.execute("""SELECT h.*,u.name AS author_name FROM hour_requests h JOIN users u ON u.id=h.author_id
             WHERE h.ticket_id=? ORDER BY h.id DESC""", (ticket_id,)).fetchall()
         file_rows = conn.execute("SELECT id,filename,size,content_type,author_id,created_at FROM attachments WHERE ticket_id=? ORDER BY id DESC", (ticket_id,)).fetchall()
-    return {"ticket": item, "messages": [dict(x) for x in messages],
-            "events": [dict(x) for x in events], "estimates": [dict(x) for x in estimates],
+        service_rows = []
+        item["service_minutes"] = conn.execute("SELECT COALESCE(SUM(minutes),0) FROM service_entries WHERE is_billable=1 AND ticket_id=?", (ticket_id,)).fetchone()[0]
+        item["service_cost_rub"] = round(item["service_minutes"] / 60.0 * rate_rub)
+        item["total_cost_rub"] = item["cost_rub"] + item["service_cost_rub"]
+        if user["role"] != "customer":
+            service_rows = conn.execute(f"{SERVICE_ENTRY_SELECT} WHERE s.is_billable=1 AND s.ticket_id=? ORDER BY s.occurred_at DESC, s.id DESC",
+                                        (ticket_id,)).fetchall()
+            item["service_minutes"] = sum(row["minutes"] for row in service_rows)
+            item["service_cost_rub"] = round(item["service_minutes"] / 60.0 * rate_rub)
+            item["total_cost_rub"] = item["cost_rub"] + item["service_cost_rub"]
+        latest_reopen = max((e["id"] for e in events if e["kind"] == "reopen"), default=0)
+        item["declined"] = any(e["kind"] == "decline" and e["id"] > latest_reopen for e in events)
+        if user["role"] == "customer":
+            item["can_decide"] = customer_can_decide(conn, ticket, user)
+            item["can_write"] = customer_can_write_ticket(conn, ticket, user)
+            item["can_decline"] = customer_can_decline(conn, ticket, user)
+        reads = read_state(conn, "ticket", ticket_id)
+        return {"ticket": customer_record(conn, item, user), "messages": [message_dict(x, user) for x in messages],
+            "meeting_summaries": [customer_record(conn, x, user) for x in summaries], "read_state": reads,
+            "service_entries": [dict(x) for x in service_rows],
+            "events": [customer_record(conn, x, user) for x in events if user["role"] != "customer" or x["kind"] != "assignment"], "estimates": [customer_record(conn, x, user) for x in estimates],
             "linked_chat": dict(linked) if linked else None,
-            "time_entries": [dict(x) for x in time_rows], "hour_requests": [dict(x) for x in hour_rows],
-            "attachments": [dict(x) for x in file_rows]}
+            "time_entries": [customer_record(conn, x, user) for x in time_rows], "hour_requests": [customer_record(conn, x, user) for x in hour_rows],
+            "attachments": [customer_record(conn, x, user) for x in file_rows]}
 
 
 @app.post("/api/tickets/{ticket_id}/estimates", status_code=201)
@@ -1752,8 +2637,12 @@ def create_estimate(ticket_id: int, data: EstimateCreate, desk_session: str | No
         conn.execute("UPDATE tickets SET updated_at=? WHERE id=?", (stamp, ticket_id))
         if ticket["first_staff_response_at"] is None:
             conn.execute("UPDATE tickets SET first_staff_response_at=? WHERE id=?", (stamp, ticket_id))
+        if auto_approve_estimate(conn, ticket_id, ticket["customer_id"], cursor.lastrowid, data.effort_minutes):
+            text = f"Оценка заявки №{ticket_id} ({fmt_hours(data.effort_minutes)}) одобрена автоматически по вашему лимиту"
+        else:
+            text = f"Оценка заявки №{ticket_id} готова к рассмотрению"
         for recipient in customer_recipients(conn, ticket):
-            notify(conn, recipient, ticket_id, "estimate", f"Оценка заявки №{ticket_id} готова к рассмотрению")
+            notify(conn, recipient, ticket_id, "estimate", text)
         return dict(conn.execute("SELECT * FROM estimates WHERE id=?", (cursor.lastrowid,)).fetchone())
 
 
@@ -1772,7 +2661,7 @@ def decide_estimate_service(conn, user, ticket_id: int, data: EstimateDecision):
         raise HTTPException(422, "Укажите желаемые трудозатраты или комментарий")
     ticket = ticket_for(conn, ticket_id, user)
     if not customer_can_decide(conn, ticket, user):
-        raise HTTPException(403, "Согласовать часы может автор заявки или владелец компании")
+        raise HTTPException(403, "Личную заявку согласует автор, общую — владелец компании")
     if ticket["status"] == "closed":
         raise HTTPException(409, "Заявка закрыта")
     estimate = latest_estimate(conn, ticket_id)
@@ -1813,17 +2702,18 @@ def add_message_service(conn, user, ticket_id: int, data: MessageCreate):
     ticket = ticket_for(conn, ticket_id, user)
     if not customer_can_write_ticket(conn, ticket, user):
         raise HTTPException(403, "Наблюдатель может только читать заявку")
-    existing = conn.execute("""SELECT m.id,m.body,m.created_at,m.author_id,u.name AS author_name,u.role AS author_role
-        FROM messages m JOIN users u ON u.id=m.author_id WHERE m.ticket_id=? AND m.author_id=? AND m.request_id=?""",
-        (ticket_id, user["id"], data.request_id)).fetchone()
+    existing = conn.execute(f"{TICKET_MESSAGE_SELECT} WHERE m.ticket_id=? AND m.author_id=? AND m.request_id=?",
+                            (ticket_id, user["id"], data.request_id)).fetchone()
     if existing:
-        return dict(existing)
+        return message_dict(existing, user)
     if ticket["status"] == "closed":
         raise HTTPException(409, "Заявка закрыта")
+    reply_to = checked_reply(conn, "messages", "ticket_id", ticket_id, data.reply_to_id)
     stamp = now()
-    cursor = conn.execute("INSERT INTO messages(ticket_id,author_id,body,created_at,request_id) VALUES(?,?,?,?,?)",
-                          (ticket_id, user["id"], body, stamp, data.request_id))
+    cursor = conn.execute("INSERT INTO messages(ticket_id,author_id,body,created_at,request_id,reply_to_id) VALUES(?,?,?,?,?,?)",
+                          (ticket_id, user["id"], body, stamp, data.request_id, reply_to))
     conn.execute("UPDATE tickets SET updated_at=? WHERE id=?", (stamp, ticket_id))
+    mark_read(conn, "ticket", ticket_id, user["id"], cursor.lastrowid)
     if user["role"] != "customer" and ticket["first_staff_response_at"] is None:
         conn.execute("UPDATE tickets SET first_staff_response_at=? WHERE id=?", (stamp, ticket_id))
     recipient = ticket["assignee_id"] if user["role"] == "customer" else None
@@ -1836,17 +2726,60 @@ def add_message_service(conn, user, ticket_id: int, data: MessageCreate):
     else:
         for dispatcher in conn.execute("SELECT id FROM users WHERE (role='admin' OR is_manager=1) AND active=1"):
             notify(conn, dispatcher["id"], ticket_id, "message", f"Новое сообщение в заявке №{ticket_id}")
-    message_payload = {"id": cursor.lastrowid, "body": body, "created_at": stamp,
-                       "author_id": user["id"], "author_name": user["name"], "author_role": user["role"]}
+    message_payload = message_dict(conn.execute(f"{TICKET_MESSAGE_SELECT} WHERE m.id=?", (cursor.lastrowid,)).fetchone())
     ticket_participants = set(customer_recipients(conn, ticket))
     if ticket["assignee_id"]:
         ticket_participants.add(ticket["assignee_id"])
     for dispatcher in conn.execute("SELECT id FROM users WHERE (role='admin' OR is_manager=1) AND active=1"):
         ticket_participants.add(dispatcher["id"])
-    realtime_bus.broadcast(ticket_participants, {
-        "type": "ticket_message", "ticket_id": ticket_id, "message": message_payload
-    })
-    return message_payload
+    for recipient_id in ticket_participants:
+        viewer = conn.execute("SELECT role FROM users WHERE id=?", (recipient_id,)).fetchone()
+        if viewer:
+            realtime_bus.publish(recipient_id, {
+                "type": "ticket_message", "ticket_id": ticket_id,
+                "message": message_dict(message_payload, viewer)
+            })
+    return message_dict(message_payload, user)
+
+
+def dispatcher_ids(conn):
+    return {row["id"] for row in conn.execute("SELECT id FROM users WHERE (role='admin' OR is_manager=1) AND active=1")}
+
+
+def mark_record_read(conn, user, kind, record_id, last_id, participants):
+    """Отмечает переписку прочитанной и гасит уведомления по ней; другой стороне уходит новая отметка."""
+    table, key = ("messages", "ticket_id") if kind == "ticket" else ("chat_messages", "chat_id")
+    top = conn.execute(f"SELECT MAX(id) FROM {table} WHERE {key}=?", (record_id,)).fetchone()[0] or 0
+    last = min(last_id, top) if last_id else top
+    before = read_state(conn, kind, record_id)
+    if last:
+        mark_read(conn, kind, record_id, user["id"], last)
+    notifications = "notifications" if kind == "ticket" else "chat_notifications"
+    conn.execute(f"UPDATE {notifications} SET read_at=? WHERE user_id=? AND {key}=? AND read_at IS NULL",
+                 (now(), user["id"], record_id))
+    after = read_state(conn, kind, record_id)
+    if after != before:
+        realtime_bus.broadcast(participants, {"type": "read", "target": kind, "record_id": record_id, **after})
+    return after
+
+
+@app.post("/api/tickets/{ticket_id}/read")
+def read_ticket(ticket_id: int, data: ReadMark, desk_session: str | None = Cookie(default=None)):
+    user = current_user(desk_session)
+    with db() as conn:
+        ticket = ticket_for(conn, ticket_id, user, write=False)
+        participants = customer_recipients(conn, ticket) | dispatcher_ids(conn) | ({ticket["assignee_id"]} - {None})
+        return mark_record_read(conn, user, "ticket", ticket_id, data.last_id, participants)
+
+
+@app.post("/api/chats/{chat_id}/read")
+def read_chat(chat_id: int, data: ReadMark, desk_session: str | None = Cookie(default=None)):
+    user = current_user(desk_session)
+    with db() as conn:
+        chat = chat_for(conn, chat_id, user)
+        chat_id = chat["id"]
+        participants = chat_recipients(conn, chat) | dispatcher_ids(conn) | ({chat["assignee_id"]} - {None})
+        return mark_record_read(conn, user, "chat", chat_id, data.last_id, participants)
 
 
 @app.patch("/api/tickets/{ticket_id}/assignee")
@@ -1867,7 +2800,7 @@ def assign(ticket_id: int, data: Assignment, desk_session: str | None = Cookie(d
                       str(data.assignee_id) if data.assignee_id else None, stamp))
         if data.assignee_id and data.assignee_id != ticket["assignee_id"]:
             notify(conn, data.assignee_id, ticket_id, "assignment", f"Вам назначена заявка №{ticket_id}")
-        return ticket_dict(ticket_for(conn, ticket_id, user))
+        return customer_record(conn, ticket_for(conn, ticket_id, user), user)
 
 
 @app.patch("/api/tickets/{ticket_id}/status")
@@ -1877,8 +2810,16 @@ def change_status(ticket_id: int, data: StatusChange, desk_session: str | None =
     with db() as conn:
         conn.execute("BEGIN IMMEDIATE")
         ticket = ticket_for(conn, ticket_id, user)
-        if user["role"] != "admin" and ticket["assignee_id"] != user["id"]:
+        if ticket["status"] == "closed" and data.status != "closed":
+            raise HTTPException(409, "Закрытую заявку возвращает в работу менеджер с указанием причины")
+        if ticket["status"] == data.status:
+            return ticket_dict(ticket)
+        dispatcher = user["role"] == "admin" or bool(user["is_manager"])
+        if user["role"] != "admin" and ticket["assignee_id"] != user["id"] and not (dispatcher and data.status == "closed"):
             raise HTTPException(403, "Статус меняет ответственный")
+        # Закрытие — это приёмка работы заказчиком. Без неё закрыть может только руководитель.
+        if data.status == "closed" and ticket["status"] != "closed" and not dispatcher:
+            raise HTTPException(403, "Отправьте работу на проверку: заявку закроет заказчик после приёмки")
         if data.status in ("working", "done", "closed"):
             estimate = latest_estimate(conn, ticket_id)
             if not estimate or estimate["state"] != "approved" or estimate["effort_minutes"] is None:
@@ -1891,8 +2832,12 @@ def change_status(ticket_id: int, data: StatusChange, desk_session: str | None =
         conn.execute("UPDATE tickets SET status=?,updated_at=? WHERE id=?", (data.status, stamp, ticket_id))
         conn.execute("INSERT INTO ticket_events(ticket_id,actor_id,kind,old_value,new_value,created_at) VALUES(?,?,?,?,?,?)",
                      (ticket_id, user["id"], "status", ticket["status"], data.status, stamp))
-        if ticket["customer_id"] != user["id"] and ticket["status"] != data.status:
-            notify(conn, ticket["customer_id"], ticket_id, "status", f"Статус заявки №{ticket_id} изменён")
+        if ticket["status"] != data.status:
+            if data.status == "done":
+                for recipient in customer_decision_recipients(conn, ticket):
+                    notify(conn, recipient, ticket_id, "review", f"Работа по заявке №{ticket_id} готова — проверьте и примите результат")
+            elif ticket["customer_id"] != user["id"]:
+                notify(conn, ticket["customer_id"], ticket_id, "status", f"Статус заявки №{ticket_id} изменён")
         res = ticket_dict(ticket_for(conn, ticket_id, user))
         dispatch_webhooks("ticket.status_changed", {
             "event": "ticket.status_changed",
@@ -1902,6 +2847,110 @@ def change_status(ticket_id: int, data: StatusChange, desk_session: str | None =
             "timestamp": stamp
         })
         return res
+
+
+def accept_work_service(conn, user, ticket_id: int, data: AcceptanceDecision):
+    """Заказчик принимает результат (заявка закрывается) или возвращает его на доработку с комментарием."""
+    if user["role"] != "customer":
+        raise HTTPException(403, "Работу принимает заказчик")
+    ticket = ticket_for(conn, ticket_id, user)
+    if not customer_can_decide(conn, ticket, user):
+        raise HTTPException(403, "Личную работу принимает автор заявки, общую — владелец компании")
+    if ticket["status"] != "done":
+        raise HTTPException(409, "Работа уже принята или ещё не отправлена на проверку")
+    comment = data.comment.strip()
+    if data.action == "return" and len(comment) < 3:
+        raise HTTPException(422, "Напишите, что нужно доработать")
+    stamp = now()
+    new_status = "closed" if data.action == "accept" else "working"
+    conn.execute("UPDATE tickets SET status=?,updated_at=?,accepted_at=?,accepted_by_id=? WHERE id=?",
+                 (new_status, stamp, stamp if data.action == "accept" else None,
+                  user["id"] if data.action == "accept" else None, ticket_id))
+    conn.execute("INSERT INTO ticket_events(ticket_id,actor_id,kind,old_value,new_value,created_at) VALUES(?,?,?,?,?,?)",
+                 (ticket_id, user["id"], "acceptance", "done", "accepted" if data.action == "accept" else "returned", stamp))
+    if comment:
+        # Комментарий остаётся в переписке; отдельное уведомление о сообщении не нужно — его заменяет уведомление о приёмке.
+        prefix = "Работа принята" if data.action == "accept" else "Возврат на доработку"
+        cursor = conn.execute("INSERT INTO messages(ticket_id,author_id,body,created_at,request_id) VALUES(?,?,?,?,?)",
+                              (ticket_id, user["id"], f"{prefix}: {comment}", stamp, f"acceptance-{secrets.token_hex(8)}"))
+        mark_read(conn, "ticket", ticket_id, user["id"], cursor.lastrowid)
+    if data.action == "accept":
+        text = f"Заказчик принял работу по заявке №{ticket_id}"
+    else:
+        text = f"Заказчик вернул заявку №{ticket_id} на доработку" + (f": {comment[:200]}" if comment else "")
+    recipients = {ticket["assignee_id"]} - {None} or dispatcher_ids(conn)
+    for recipient in recipients:
+        notify(conn, recipient, ticket_id, "acceptance", text)
+    dispatch_webhooks("ticket.status_changed", {"event": "ticket.status_changed", "ticket_id": ticket_id,
+                                                "old_status": "done", "new_status": new_status, "timestamp": stamp})
+    return customer_record(conn, ticket_for(conn, ticket_id, user), user)
+
+
+@app.post("/api/tickets/{ticket_id}/acceptance")
+def accept_work(ticket_id: int, data: AcceptanceDecision, desk_session: str | None = Cookie(default=None)):
+    user = current_user(desk_session)
+    with db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        return accept_work_service(conn, user, ticket_id, data)
+
+
+@app.post("/api/tickets/{ticket_id}/reopen")
+def reopen_ticket(ticket_id: int, data: ReopenTicket, desk_session: str | None = Cookie(default=None)):
+    user = current_user(desk_session)
+    require_dispatcher(user)
+    if len(data.reason.strip()) < 3:
+        raise HTTPException(422, "Укажите причину возврата в работу")
+    with db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        ticket = ticket_for(conn, ticket_id, user)
+        if ticket["status"] != "closed":
+            raise HTTPException(409, "Заявка уже открыта")
+        if ticket["act_invoice_id"]:
+            raise HTTPException(409, "Работа включена в акт. Сначала согласуйте корректировку акта")
+        estimate = latest_estimate(conn, ticket_id)
+        status = "working" if estimate and estimate["state"] == "approved" else "new"
+        conn.execute("UPDATE tickets SET status=?,accepted_at=NULL,accepted_by_id=NULL,updated_at=? WHERE id=?", (status, now(), ticket_id))
+        if ticket["assignee_id"] and not conn.execute("SELECT 1 FROM users WHERE id=? AND active=1", (ticket["assignee_id"],)).fetchone():
+            conn.execute("UPDATE tickets SET assignee_id=NULL WHERE id=?", (ticket_id,))
+        conn.execute("INSERT INTO ticket_events(ticket_id,actor_id,kind,old_value,new_value,created_at) VALUES(?,?,?,?,?,?)",
+                     (ticket_id, user["id"], "reopen", "closed", data.reason.strip(), now()))
+        for recipient in customer_recipients(conn, ticket) | ({ticket["assignee_id"]} - {None}):
+            notify(conn, recipient, ticket_id, "status", f"Заявка №{ticket_id} возвращена в работу: {data.reason.strip()}")
+        return customer_record(conn, ticket_for(conn, ticket_id, user), user)
+
+
+def decline_ticket_service(conn, user, ticket_id: int, data: TicketDecline):
+    """Заказчик отказывается от заявки, созданной за него командой: заявка закрывается без работы."""
+    if user["role"] != "customer":
+        raise HTTPException(403, "Отказаться от заявки может заказчик")
+    ticket = ticket_for(conn, ticket_id, user)
+    if not customer_can_decline(conn, ticket, user):
+        raise HTTPException(409, "От этой заявки уже нельзя отказаться")
+    comment = data.comment.strip()
+    stamp = now()
+    conn.execute("UPDATE estimates SET state='rejected',customer_comment=?,decided_at=? WHERE ticket_id=? AND state='pending'",
+                 (comment or None, stamp, ticket_id))
+    conn.execute("UPDATE tickets SET status='closed',updated_at=? WHERE id=?", (stamp, ticket_id))
+    conn.execute("INSERT INTO ticket_events(ticket_id,actor_id,kind,old_value,new_value,created_at) VALUES(?,?,?,?,?,?)",
+                 (ticket_id, user["id"], "decline", ticket["status"], "closed", stamp))
+    if comment:
+        cursor = conn.execute("INSERT INTO messages(ticket_id,author_id,body,created_at,request_id) VALUES(?,?,?,?,?)",
+                              (ticket_id, user["id"], f"Заявка не нужна: {comment}", stamp, f"decline-{secrets.token_hex(8)}"))
+        mark_read(conn, "ticket", ticket_id, user["id"], cursor.lastrowid)
+    text = f"Заказчик отказался от заявки №{ticket_id}" + (f": {comment[:200]}" if comment else "")
+    for recipient in {ticket["assignee_id"], ticket["created_by_id"]} - {None, user["id"]} or dispatcher_ids(conn):
+        notify(conn, recipient, ticket_id, "decline", text)
+    dispatch_webhooks("ticket.status_changed", {"event": "ticket.status_changed", "ticket_id": ticket_id,
+                                                "old_status": ticket["status"], "new_status": "closed", "timestamp": stamp})
+    return customer_record(conn, ticket_for(conn, ticket_id, user), user)
+
+
+@app.post("/api/tickets/{ticket_id}/decline")
+def decline_ticket(ticket_id: int, data: TicketDecline, desk_session: str | None = Cookie(default=None)):
+    user = current_user(desk_session)
+    with db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        return decline_ticket_service(conn, user, ticket_id, data)
 
 
 @app.post("/api/tickets/{ticket_id}/time-entries", status_code=201)
@@ -1955,7 +3004,7 @@ def request_hours(ticket_id: int, data: HourRequestCreate, desk_session: str | N
         cursor = conn.execute("INSERT INTO hour_requests(ticket_id,author_id,minutes,reason,created_at,request_id) VALUES(?,?,?,?,?,?)",
                               (ticket_id, user["id"], data.minutes, data.reason.strip(), stamp, data.request_id))
         conn.execute("UPDATE tickets SET updated_at=? WHERE id=?", (stamp, ticket_id))
-        for recipient in customer_recipients(conn, ticket):
+        for recipient in customer_decision_recipients(conn, ticket):
             notify(conn, recipient, ticket_id, "extra_hours", f"Согласуйте дополнительные часы по заявке №{ticket_id}")
         return dict(conn.execute("SELECT * FROM hour_requests WHERE id=?", (cursor.lastrowid,)).fetchone())
 
@@ -1964,26 +3013,30 @@ def request_hours(ticket_id: int, data: HourRequestCreate, desk_session: str | N
 def decide_hours(ticket_id: int, request_id: int, data: HourRequestDecision,
                  desk_session: str | None = Cookie(default=None)):
     user = current_user(desk_session)
-    if user["role"] != "customer":
-        raise HTTPException(403, "Решение принимает заказчик")
     with db() as conn:
         conn.execute("BEGIN IMMEDIATE")
-        ticket = ticket_for(conn, ticket_id, user)
-        if not customer_can_decide(conn, ticket, user):
-            raise HTTPException(403, "Согласовать часы может автор заявки или владелец компании")
-        row = conn.execute("SELECT * FROM hour_requests WHERE id=? AND ticket_id=?", (request_id, ticket_id)).fetchone()
-        if not row or row["state"] != "pending":
-            raise HTTPException(409, "Запрос уже рассмотрен или не найден")
-        if ticket["status"] in ("done", "closed"):
-            raise HTTPException(409, "Заявка уже завершена")
-        stamp = now()
-        state = "approved" if data.action == "approve" else "rejected"
-        conn.execute("UPDATE hour_requests SET state=?,decided_by=?,decided_at=? WHERE id=?",
-                     (state, user["id"], stamp, request_id))
-        conn.execute("UPDATE tickets SET updated_at=? WHERE id=?", (stamp, ticket_id))
-        notify(conn, ticket["assignee_id"], ticket_id, "extra_hours_decision",
-               f"Заказчик {'одобрил' if state == 'approved' else 'отклонил'} дополнительные часы по заявке №{ticket_id}")
-        return dict(conn.execute("SELECT * FROM hour_requests WHERE id=?", (request_id,)).fetchone())
+        return decide_hours_service(conn, user, ticket_id, request_id, data)
+
+
+def decide_hours_service(conn, user, ticket_id: int, request_id: int, data: HourRequestDecision):
+    if user["role"] != "customer":
+        raise HTTPException(403, "Решение принимает заказчик")
+    ticket = ticket_for(conn, ticket_id, user)
+    if not customer_can_decide(conn, ticket, user):
+        raise HTTPException(403, "Личную заявку согласует автор, общую — владелец компании")
+    row = conn.execute("SELECT * FROM hour_requests WHERE id=? AND ticket_id=?", (request_id, ticket_id)).fetchone()
+    if not row or row["state"] != "pending":
+        raise HTTPException(409, "Запрос уже рассмотрен или не найден")
+    if ticket["status"] in ("done", "closed"):
+        raise HTTPException(409, "Заявка уже завершена")
+    stamp = now()
+    state = "approved" if data.action == "approve" else "rejected"
+    conn.execute("UPDATE hour_requests SET state=?,decided_by=?,decided_at=? WHERE id=?",
+                 (state, user["id"], stamp, request_id))
+    conn.execute("UPDATE tickets SET updated_at=? WHERE id=?", (stamp, ticket_id))
+    notify(conn, ticket["assignee_id"], ticket_id, "extra_hours_decision",
+           f"Заказчик {'одобрил' if state == 'approved' else 'отклонил'} дополнительные часы по заявке №{ticket_id}")
+    return dict(conn.execute("SELECT * FROM hour_requests WHERE id=?", (request_id,)).fetchone())
 
 
 @app.patch("/api/tickets/{ticket_id}/deadline")
@@ -1997,6 +3050,208 @@ def set_delivery_deadline(ticket_id: int, data: DeliveryDeadline, desk_session: 
         return {"delivery_due_at": due}
 
 
+@app.post("/api/company-owners", status_code=201)
+def create_company_owner(data: CompanyOwnerCreate, response: Response,
+                         desk_session: str | None = Cookie(default=None)):
+    user = current_user(desk_session)
+    require_dispatcher(user)
+    name = data.name.strip()
+    company_name = data.company_name.strip()
+    if len(name) < 2 or (data.organization_id is None and len(company_name) < 2):
+        raise HTTPException(422, "Укажите имя владельца и название компании")
+    login = f"owner-{secrets.token_hex(10)}@access.local"
+    password = secrets.token_urlsafe(18)
+    expires = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+    with db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        if data.organization_id is not None:
+            organization = conn.execute("SELECT * FROM organizations WHERE id=?", (data.organization_id,)).fetchone()
+            if not organization:
+                raise HTTPException(404, "Компания не найдена")
+            organization_id = organization["id"]
+            company_name = organization["name"]
+        else:
+            organization_id = conn.execute("INSERT INTO organizations(name,created_at) VALUES(?,?)",
+                                           (company_name, now())).lastrowid
+        owner = create_user(conn, name, login, password, "customer")
+        conn.execute("UPDATE users SET must_change_credentials=1,temporary_credentials_expires_at=? WHERE id=?",
+                     (expires, owner["id"]))
+        conn.execute("INSERT INTO organization_members(organization_id,user_id,role,joined_at) VALUES(?,?,?,?)",
+                     (organization_id, owner["id"], "owner", now()))
+    response.headers["Cache-Control"] = "no-store"
+    return {"id": owner["id"], "organization_id": organization_id, "company_name": company_name,
+            "login": login, "temporary_password": password, "expires_at": expires}
+
+
+@app.post("/api/account/credentials")
+def replace_temporary_credentials(data: PermanentCredentials, response: Response,
+                                  desk_session: str | None = Cookie(default=None)):
+    user = current_user(desk_session, allow_temporary=True)
+    email = clean_email(data.email)
+    with db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        user = conn.execute("SELECT * FROM users WHERE id=?", (user["id"],)).fetchone()
+        if not user["must_change_credentials"]:
+            raise HTTPException(409, "Временные данные уже заменены")
+        if user["temporary_credentials_expires_at"] <= now():
+            raise HTTPException(401, "Временный доступ истёк")
+        if not verify_password(data.current_password, user["password_hash"]):
+            raise HTTPException(403, "Неверный временный пароль")
+        if email == user["email"] or email.endswith("@access.local"):
+            raise HTTPException(422, "Укажите свой постоянный email")
+        if verify_password(data.password, user["password_hash"]):
+            raise HTTPException(422, "Новый пароль должен отличаться от временного")
+        try:
+            conn.execute("UPDATE users SET email=?,password_hash=?,must_change_credentials=0,temporary_credentials_expires_at=NULL WHERE id=?",
+                         (email, password_hash(data.password), user["id"]))
+        except sqlite3.IntegrityError:
+            raise HTTPException(409, "Email уже используется")
+        conn.execute("DELETE FROM sessions WHERE user_id=?", (user["id"],))
+        user = conn.execute("SELECT * FROM users WHERE id=?", (user["id"],)).fetchone()
+        response.headers["Cache-Control"] = "no-store"
+        return issue_session(conn, user, response)
+
+
+def issue_account_link(conn, user, kind):
+    token = secrets.token_urlsafe(32)
+    expires = (datetime.now(timezone.utc) + timedelta(hours=1 if kind == "reset" else 72)).isoformat()
+    conn.execute("UPDATE email_outbox SET state='superseded' WHERE user_id=? AND kind=? AND state='pending'", (user["id"], kind))
+    conn.execute("DELETE FROM account_tokens WHERE user_id=? AND kind=?", (user["id"], kind))
+    conn.execute("INSERT INTO account_tokens VALUES(?,?,?,?,?)", (token_hash(token), user["id"], kind, expires, now()))
+    link = f"{public_base()}/?{kind}={token}"
+    subject = "Восстановление доступа" if kind == "reset" else "Приглашение в кабинет заказчика"
+    body = f"{subject}. Откройте ссылку и задайте пароль: {link}\nСсылка действует до {expires}. Если вы не запрашивали доступ, проигнорируйте письмо."
+    queue_email(conn, user["id"], user["email"], kind, subject, body,
+                f'<p>{html.escape(subject)}</p><p><a href="{html.escape(link, quote=True)}">Открыть кабинет и задать пароль</a></p><p>Ссылка действует до {html.escape(expires)}.</p><p>Если вы не запрашивали доступ, проигнорируйте письмо.</p>')
+    return {"url": link, "expires_at": expires}
+
+
+def require_company_manager(conn, user, organization_id):
+    if user["role"] == "admin" or user["is_manager"]:
+        return
+    member = conn.execute("SELECT role FROM organization_members WHERE organization_id=? AND user_id=?", (organization_id, user["id"])).fetchone()
+    if user["role"] != "customer" or not member or member["role"] != "owner":
+        raise HTTPException(403, "Участниками управляет владелец компании или менеджер")
+
+
+@app.get("/api/customer-invitations")
+def customer_invitations(desk_session: str | None = Cookie(default=None)):
+    user = current_user(desk_session)
+    with db() as conn:
+        manager = user["role"] == "admin" or bool(user["is_manager"])
+        org = customer_organization(conn, user["id"]) if user["role"] == "customer" else None
+        if not manager:
+            if not org:
+                raise HTTPException(403, "Доступно владельцу компании")
+            require_company_manager(conn, user, org["id"])
+        rows = conn.execute("""SELECT u.id AS customer_id,u.name,u.email,u.must_change_credentials,
+            m.organization_id,m.role,a.expires_at,a.created_at,
+            (SELECT state FROM email_outbox e WHERE e.user_id=u.id AND e.kind='invite' ORDER BY e.id DESC LIMIT 1) AS delivery_state
+            FROM users u LEFT JOIN organization_members m ON m.user_id=u.id
+            LEFT JOIN account_tokens a ON a.user_id=u.id AND a.kind='invite'
+            WHERE u.role='customer' AND (? OR m.organization_id=?)
+            AND (a.token_hash IS NOT NULL OR EXISTS(SELECT 1 FROM email_outbox e WHERE e.user_id=u.id AND e.kind='invite'))
+            ORDER BY u.name""", (manager, org["id"] if org else None)).fetchall()
+        return [{**dict(row), "status": "activated" if not row["must_change_credentials"] else
+                 "expired" if not row["expires_at"] or row["expires_at"] <= now() else "pending"} for row in rows]
+
+
+@app.post("/api/customer-invitations", status_code=201)
+def invite_customer(data: AccountInvitation, response: Response, desk_session: str | None = Cookie(default=None)):
+    manager = current_user(desk_session)
+    email = clean_email(data.email)
+    if data.company_name is not None and len(data.company_name.strip()) < 2:
+        raise HTTPException(422, "Укажите название компании из двух или более символов")
+    if len(data.name.strip()) < 2 or email.endswith("@access.local"):
+        raise HTTPException(422, "Укажите имя и постоянный email заказчика")
+    with db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        if data.organization_id:
+            require_company_manager(conn, manager, data.organization_id)
+        else:
+            require_dispatcher(manager)
+        if data.company_name and data.organization_id:
+            raise HTTPException(422, "Выберите существующую компанию или название новой")
+        if data.organization_id and not conn.execute("SELECT 1 FROM organizations WHERE id=?", (data.organization_id,)).fetchone():
+            raise HTTPException(404, "Компания не найдена")
+        customer = conn.execute("SELECT * FROM users WHERE email=?", (email,)).fetchone()
+        if customer and (customer["role"] != "customer" or not customer["active"]):
+            raise HTTPException(409, "Этот email нельзя использовать для приглашения заказчика")
+        registered = bool(customer and not customer["must_change_credentials"])
+        if not customer:
+            customer = create_user(conn, data.name, email, secrets.token_urlsafe(32), "customer")
+            conn.execute("UPDATE users SET must_change_credentials=1,temporary_credentials_expires_at=? WHERE id=?",
+                         ((datetime.now(timezone.utc)+timedelta(hours=72)).isoformat(), customer["id"]))
+        if data.company_name:
+            if customer_organization(conn, customer["id"]):
+                raise HTTPException(409, "Заказчик уже состоит в компании")
+            created_org = conn.execute("INSERT INTO organizations(name,created_at) VALUES(?,?)", (data.company_name.strip(), now()))
+            data.organization_id = created_org.lastrowid
+            data.role = "owner"
+        existing_org = customer_organization(conn, customer["id"])
+        if existing_org and data.organization_id is None:
+            data.organization_id = existing_org["id"]
+        if existing_org and existing_org["id"] != data.organization_id:
+            raise HTTPException(409, "Заказчик уже состоит в другой компании")
+        if data.organization_id and not existing_org:
+            conn.execute("INSERT INTO organization_members(organization_id,user_id,role,joined_at) VALUES(?,?,?,?)",
+                         (data.organization_id, customer["id"], data.role, now()))
+        if registered:
+            return {"customer_id": customer["id"], "email": email, "organization_id": data.organization_id, "registered": True}
+        conn.execute("UPDATE users SET temporary_credentials_expires_at=? WHERE id=?", ((datetime.now(timezone.utc)+timedelta(hours=72)).isoformat(), customer["id"]))
+        access = issue_account_link(conn, customer, "invite")
+        response.headers["Cache-Control"] = "no-store"
+        return {"customer_id": customer["id"], "email": email, "organization_id": data.organization_id, "registered": False, **access}
+
+
+@app.post("/api/account/reset-request")
+def request_password_reset(data: AccountEmail):
+    email = clean_email(data.email)
+    with db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        user = conn.execute("SELECT * FROM users WHERE email=? AND active=1 AND must_change_credentials=0", (email,)).fetchone()
+        if user and not email.endswith("@access.local"):
+            recent = conn.execute("SELECT 1 FROM account_tokens WHERE user_id=? AND kind='reset' AND created_at>?",
+                                  (user["id"], (datetime.now(timezone.utc)-timedelta(minutes=5)).isoformat())).fetchone()
+            if not recent:
+                issue_account_link(conn, user, "reset")
+    return {"message": "Если этот email зарегистрирован, мы отправили ссылку для восстановления доступа"}
+
+
+@app.post("/api/account/activate/{kind}")
+def activate_account(kind: Literal["invite", "reset"], data: AccountTokenPassword, response: Response):
+    with db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        token = conn.execute("SELECT * FROM account_tokens WHERE token_hash=? AND kind=? AND expires_at>?", (token_hash(data.token), kind, now())).fetchone()
+        if not token:
+            raise HTTPException(409, "Приглашение недействительно или истекло. Попросите менеджера прислать новое" if kind == "invite" else "Ссылка недействительна или истекла. Запросите новую ссылку через «Забыли пароль?»")
+        user = conn.execute("SELECT * FROM users WHERE id=? AND active=1", (token["user_id"],)).fetchone()
+        if not user or (kind == "invite" and not user["must_change_credentials"]):
+            raise HTTPException(409, "Приглашение уже использовано или доступ отключён")
+        conn.execute("UPDATE users SET password_hash=?,must_change_credentials=0,temporary_credentials_expires_at=NULL WHERE id=?", (password_hash(data.password), user["id"]))
+        conn.execute("DELETE FROM sessions WHERE user_id=?", (user["id"],))
+        conn.execute("DELETE FROM account_tokens WHERE user_id=?", (user["id"],))
+        response.headers["Cache-Control"] = "no-store"
+        return issue_session(conn, conn.execute("SELECT * FROM users WHERE id=?", (user["id"],)).fetchone(), response)
+
+
+@app.post("/api/company-owners/{owner_id}/temporary-access")
+def renew_temporary_owner_access(owner_id: int, response: Response, desk_session: str | None = Cookie(default=None)):
+    manager = current_user(desk_session)
+    require_dispatcher(manager)
+    with db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        owner = conn.execute("SELECT * FROM users WHERE id=? AND role='customer' AND active=1 AND must_change_credentials=1", (owner_id,)).fetchone()
+        if not owner or not owner["email"].endswith("@access.local"):
+            raise HTTPException(409, "Перевыпуск доступен только владельцу с временным логином")
+        password = secrets.token_urlsafe(18)
+        expires = (datetime.now(timezone.utc)+timedelta(days=7)).isoformat()
+        conn.execute("UPDATE users SET password_hash=?,temporary_credentials_expires_at=? WHERE id=?", (password_hash(password), expires, owner_id))
+        conn.execute("DELETE FROM sessions WHERE user_id=?", (owner_id,))
+        response.headers["Cache-Control"] = "no-store"
+        return {"id": owner_id, "login": owner["email"], "temporary_password": password, "expires_at": expires}
+
+
 @app.get("/api/organizations")
 def organizations(desk_session: str | None = Cookie(default=None)):
     user = current_user(desk_session)
@@ -2008,7 +3263,7 @@ def organizations(desk_session: str | None = Cookie(default=None)):
                 WHERE m.user_id=?""", (user["id"],)).fetchall()
         else:
             rows = []
-        return [{**dict(row), "members": [dict(x) for x in conn.execute("""SELECT m.user_id,m.role,u.name,u.email
+        return [{**dict(row), "has_available_owner": bool(available_owners(conn, row["id"])), "members": [dict(x) for x in conn.execute("""SELECT m.user_id,m.role,u.name,u.email,u.active,u.must_change_credentials,u.temporary_credentials_expires_at
             FROM organization_members m JOIN users u ON u.id=m.user_id WHERE m.organization_id=? ORDER BY m.role,u.name""", (row["id"],))]} for row in rows]
 
 
@@ -2016,9 +3271,13 @@ def organizations(desk_session: str | None = Cookie(default=None)):
 def create_organization(data: OrganizationCreate, desk_session: str | None = Cookie(default=None)):
     user = current_user(desk_session)
     require_dispatcher(user)
+    if len(data.name.strip()) < 2:
+        raise HTTPException(422, "Укажите название компании: минимум 2 символа")
     with db() as conn:
         conn.execute("BEGIN IMMEDIATE")
-        owner = conn.execute("SELECT id FROM users WHERE id=? AND role='customer' AND active=1", (data.owner_id,)).fetchone()
+        owner = conn.execute("""SELECT id FROM users WHERE id=? AND role='customer' AND active=1
+            AND (must_change_credentials=0 OR temporary_credentials_expires_at>?)
+            AND NOT EXISTS (SELECT 1 FROM account_tokens a WHERE a.user_id=users.id AND a.kind='invite')""", (data.owner_id, now())).fetchone()
         if not owner:
             raise HTTPException(422, "Заказчик не найден")
         if customer_organization(conn, data.owner_id):
@@ -2033,9 +3292,9 @@ def create_organization(data: OrganizationCreate, desk_session: str | None = Coo
 def add_organization_member(organization_id: int, data: OrganizationMemberCreate,
                             desk_session: str | None = Cookie(default=None)):
     user = current_user(desk_session)
-    require_dispatcher(user)
     with db() as conn:
         conn.execute("BEGIN IMMEDIATE")
+        require_company_manager(conn, user, organization_id)
         if not conn.execute("SELECT 1 FROM organizations WHERE id=?", (organization_id,)).fetchone():
             raise HTTPException(404, "Компания не найдена")
         member = conn.execute("SELECT id FROM users WHERE email=? AND role='customer' AND active=1", (clean_email(data.email),)).fetchone()
@@ -2053,10 +3312,8 @@ def organization_member_to_edit(conn, organization_id, member_id):
                        (organization_id, member_id)).fetchone()
     if not row:
         raise HTTPException(404, "Участник не найден")
-    if row["role"] == "owner" and conn.execute(
-        "SELECT COUNT(*) FROM organization_members WHERE organization_id=? AND role='owner'",
-        (organization_id,)).fetchone()[0] <= 1:
-        raise HTTPException(409, "У компании должен остаться владелец")
+    if row["role"] == "owner" and not available_owners(conn, organization_id, member_id):
+        raise HTTPException(409, "Сначала назначьте другого активного владельца с действующим доступом")
     return row
 
 
@@ -2064,9 +3321,9 @@ def organization_member_to_edit(conn, organization_id, member_id):
 def update_organization_member(organization_id: int, member_id: int, data: OrganizationMemberRole,
                                desk_session: str | None = Cookie(default=None)):
     user = current_user(desk_session)
-    require_dispatcher(user)
     with db() as conn:
         conn.execute("BEGIN IMMEDIATE")
+        require_company_manager(conn, user, organization_id)
         current = conn.execute("SELECT * FROM organization_members WHERE organization_id=? AND user_id=?",
                                (organization_id, member_id)).fetchone()
         if not current:
@@ -2082,9 +3339,9 @@ def update_organization_member(organization_id: int, member_id: int, data: Organ
 def remove_organization_member(organization_id: int, member_id: int,
                                desk_session: str | None = Cookie(default=None)):
     user = current_user(desk_session)
-    require_dispatcher(user)
     with db() as conn:
         conn.execute("BEGIN IMMEDIATE")
+        require_company_manager(conn, user, organization_id)
         organization_member_to_edit(conn, organization_id, member_id)
         conn.execute("DELETE FROM organization_members WHERE organization_id=? AND user_id=?",
                      (organization_id, member_id))
@@ -2140,20 +3397,24 @@ async def add_chat_attachment(chat_id: int, file: UploadFile = File(...),
     user = current_user(desk_session)
     with db() as conn:
         chat = chat_for(conn, chat_id, user)
+        chat_id = chat["id"]
         if message_id is not None and not conn.execute("""SELECT 1 FROM chat_messages WHERE id=? AND chat_id=?
             AND author_id=?""", (message_id, chat_id, user["id"])).fetchone():
             raise HTTPException(403, "Сообщение не найдено")
     filename, stored_name, content_type, size = await save_attachment(file)
     try:
         with db() as conn:
-            chat_for(conn, chat_id, user)
+            chat = chat_for(conn, chat_id, user)
+            chat_id = chat["id"]
             cursor = conn.execute("""INSERT INTO attachments(chat_id,chat_message_id,author_id,filename,stored_name,
                 content_type,size,created_at) VALUES(?,?,?,?,?,?,?,?)""",
                 (chat_id, message_id, user["id"], filename, stored_name, content_type, size, now()))
             conn.execute("UPDATE chats SET updated_at=? WHERE id=?", (now(), chat_id))
-            recipient = chat["assignee_id"] if user["role"] == "customer" else chat["customer_id"]
-            if recipient and recipient != user["id"]:
+            chat = chat_for(conn, chat_id, user)
+            for recipient in chat_message_recipients(conn, chat, user):
                 notify_chat(conn, recipient, chat_id, "attachment", "Новый файл в общем чате")
+            realtime_bus.broadcast(chat_recipients(conn, chat) | dispatcher_ids(conn) | ({chat["assignee_id"]} - {None}),
+                                   {"type": "chat_message", "chat_id": chat_id})
             return {"id": cursor.lastrowid, "filename": filename, "size": size}
     except Exception:
         (ATTACHMENT_DIR / stored_name).unlink(missing_ok=True)
@@ -2168,7 +3429,7 @@ def download_attachment(attachment_id: int, desk_session: str | None = Cookie(de
         if not row:
             raise HTTPException(404, "Файл не найден")
         if row["ticket_id"] is not None:
-            ticket_for(conn, row["ticket_id"], user)
+            ticket_for(conn, row["ticket_id"], user, write=False)
         else:
             chat_for(conn, row["chat_id"], user)
     path = ATTACHMENT_DIR / row["stored_name"]
@@ -2324,7 +3585,7 @@ def get_internal_notes(ticket_id: int, desk_session: str | None = Cookie(default
     user = current_user(desk_session)
     require_staff(user)
     with db() as conn:
-        ticket_for(conn, ticket_id, user)
+        ticket_for(conn, ticket_id, user, write=False)
         rows = conn.execute("""
             SELECT n.*, u.name AS author_name, u.role AS author_role
             FROM ticket_internal_notes n
@@ -2847,7 +4108,7 @@ def test_webhook(webhook_id: int, desk_session: str | None = Cookie(default=None
         "webhook_id": webhook_id,
         "triggered_by": user["name"],
         "timestamp": now(),
-        "message": "Тестовое событие от сервиса заявок Линия"
+        "message": "Тестовое событие от сервиса заявок Codari"
     }
     execute_webhook_sync(wh["id"], wh["url"], wh["secret"], "webhook.test", test_payload)
     with db() as conn:
@@ -2863,7 +4124,7 @@ def test_webhook(webhook_id: int, desk_session: str | None = Cookie(default=None
 def get_ticket_git_links(ticket_id: int, desk_session: str | None = Cookie(default=None)):
     user = current_user(desk_session)
     with db() as conn:
-        ticket_for(conn, ticket_id, user)
+        ticket_for(conn, ticket_id, user, write=False)
         rows = conn.execute("""
             SELECT g.*, u.name AS author_name
             FROM ticket_git_links g
@@ -2871,7 +4132,7 @@ def get_ticket_git_links(ticket_id: int, desk_session: str | None = Cookie(defau
             WHERE g.ticket_id = ?
             ORDER BY g.id DESC
         """, (ticket_id,)).fetchall()
-        return [dict(r) for r in rows]
+        return [customer_record(conn, r, user) for r in rows]
 
 
 @app.post("/api/tickets/{ticket_id}/git-links", status_code=201)
@@ -3084,7 +4345,7 @@ def generate_document_html(doc: dict, client: dict, items: list[dict]) -> str:
             </tr>
             <tr>
                 <td colspan="2">
-                    ООО "Линия Сервис"<br>
+                    ООО "Codari Сервис"<br>
                     <small style="color:#666;">Получатель</small>
                 </td>
             </tr>
@@ -3105,7 +4366,7 @@ def generate_document_html(doc: dict, client: dict, items: list[dict]) -> str:
     <div class="signatures-grid">
         <div class="sig-block">
             <strong>Исполнитель:</strong><br>
-            Директор ООО "Линия Сервис"<br><br><br>
+            Директор ООО "Codari Сервис"<br><br><br>
             ______________________ /Иванов А.С./<br>
             <small>М.П.</small>
         </div>
@@ -3244,7 +4505,7 @@ def generate_document_html(doc: dict, client: dict, items: list[dict]) -> str:
         <h1>{title_h1} {sub_title}</h1>
 
         <div class="parties" style="margin-top:16px;">
-            <p><strong>Исполнитель:</strong> ООО "Линия Сервис", ИНН 7701234567, КПП 770101001, 123112, г. Москва, Пресненская наб., д. 12, тел. +7 (495) 120-00-00</p>
+            <p><strong>Исполнитель:</strong> ООО "Codari Сервис", ИНН 7701234567, КПП 770101001, 123112, г. Москва, Пресненская наб., д. 12, тел. +7 (495) 120-00-00</p>
             <p><strong>Заказчик:</strong> {client_display_name}{f", ИНН {client['inn']}" if client['inn'] else ""}{f", КПП {client['kpp']}" if client['kpp'] else ""}{f", Адрес: {html.escape(str(client['legal_address']))}" if client['legal_address'] else ""}</p>
             <p><strong>Основание:</strong> Договор оказания услуг технической поддержки и сопровождения</p>
             {period_str}
@@ -3300,6 +4561,8 @@ def generate_document_html(doc: dict, client: dict, items: list[dict]) -> str:
 @app.get("/api/billing/overview")
 def get_billing_overview(desk_session: str | None = Cookie(default=None)):
     user = current_user(desk_session)
+    if user["role"] != "customer":
+        require_finance(user)
     with db() as conn:
         if user["role"] == "customer":
             org = customer_organization(conn, user["id"])
@@ -3328,7 +4591,8 @@ def get_billing_overview(desk_session: str | None = Cookie(default=None)):
             in_progress_minutes = sum(approved_minutes(conn, t["id"]) for t in active_tickets)
 
             unbilled_tickets = conn.execute(f"SELECT id FROM tickets WHERE {cond} AND status IN ('done','closed') AND act_invoice_id IS NULL", params).fetchall()
-            unbilled_minutes = sum(approved_minutes(conn, t["id"]) for t in unbilled_tickets)
+            unbilled_service = unbilled_service_minutes(conn, client_type, client_id)
+            unbilled_minutes = sum(approved_minutes(conn, t["id"]) for t in unbilled_tickets) + unbilled_service
 
             invoices = conn.execute(f"SELECT * FROM invoices WHERE {cond} ORDER BY id DESC LIMIT 50", params).fetchall()
             transactions = conn.execute(f"SELECT * FROM billing_transactions WHERE {cond} ORDER BY id DESC LIMIT 50", params).fetchall()
@@ -3350,8 +4614,7 @@ def get_billing_overview(desk_session: str | None = Cookie(default=None)):
                 "transactions": [dict(r) for r in transactions]
             }
         else:
-            require_staff(user)
-            paid_sum = conn.execute("SELECT COALESCE(SUM(total_rub), 0) FROM invoices WHERE status='paid'").fetchone()[0]
+            paid_sum = conn.execute("SELECT COALESCE(SUM(total_rub), 0) FROM invoices WHERE status='paid' AND doc_type='invoice'").fetchone()[0]
 
             active_tickets = conn.execute("SELECT id FROM tickets WHERE status IN ('new','working','waiting')").fetchall()
             total_active_mins = sum(approved_minutes(conn, t["id"]) for t in active_tickets)
@@ -3359,7 +4622,8 @@ def get_billing_overview(desk_session: str | None = Cookie(default=None)):
             clients = []
             for o in conn.execute("SELECT * FROM organizations ORDER BY name").fetchall():
                 unb = conn.execute("SELECT id FROM tickets WHERE organization_id=? AND status IN ('done','closed') AND act_invoice_id IS NULL", (o["id"],)).fetchall()
-                unb_mins = sum(approved_minutes(conn, t["id"]) for t in unb)
+                service_mins = unbilled_service_minutes(conn, "org", o["id"])
+                unb_mins = sum(approved_minutes(conn, t["id"]) for t in unb) + service_mins
                 rate = o["hourly_rate_rub"] or 3000
                 bal_m = o["balance_minutes"] or 0
                 open_cnt = conn.execute("SELECT COUNT(*) FROM tickets WHERE organization_id=? AND status NOT IN ('closed')", (o["id"],)).fetchone()[0]
@@ -3373,6 +4637,7 @@ def get_billing_overview(desk_session: str | None = Cookie(default=None)):
                     "balance_rub": round(bal_m / 60.0 * rate),
                     "unbilled_minutes": unb_mins,
                     "unbilled_rub": round(unb_mins / 60.0 * rate),
+                    "unbilled_service_minutes": service_mins,
                     "open_tickets": open_cnt
                 })
 
@@ -3387,7 +4652,8 @@ def get_billing_overview(desk_session: str | None = Cookie(default=None)):
 
             for s in standalone:
                 unb = conn.execute("SELECT id FROM tickets WHERE customer_id=? AND organization_id IS NULL AND status IN ('done','closed') AND act_invoice_id IS NULL", (s["id"],)).fetchall()
-                unb_mins = sum(approved_minutes(conn, t["id"]) for t in unb)
+                service_mins = unbilled_service_minutes(conn, "user", s["id"])
+                unb_mins = sum(approved_minutes(conn, t["id"]) for t in unb) + service_mins
                 rate = s["hourly_rate_rub"] or 3000
                 bal_m = s["balance_minutes"] or 0
                 cname = s["company_name"] if s["company_name"] else s["name"]
@@ -3402,8 +4668,11 @@ def get_billing_overview(desk_session: str | None = Cookie(default=None)):
                     "balance_rub": round(bal_m / 60.0 * rate),
                     "unbilled_minutes": unb_mins,
                     "unbilled_rub": round(unb_mins / 60.0 * rate),
+                    "unbilled_service_minutes": service_mins,
                     "open_tickets": open_cnt
                 })
+
+            service_entries = conn.execute(f"{SERVICE_ENTRY_SELECT} WHERE s.is_billable=1 ORDER BY s.occurred_at DESC, s.id DESC LIMIT 100").fetchall()
 
             invoices = conn.execute("""
                 SELECT i.*, 
@@ -3428,6 +4697,7 @@ def get_billing_overview(desk_session: str | None = Cookie(default=None)):
                 "total_paid_rub": paid_sum,
                 "total_active_minutes": total_active_mins,
                 "clients": clients,
+                "service_entries": [dict(r) for r in service_entries],
                 "invoices": [dict(r) for r in invoices],
                 "transactions": [dict(r) for r in transactions]
             }
@@ -3436,7 +4706,7 @@ def get_billing_overview(desk_session: str | None = Cookie(default=None)):
 @app.get("/api/billing/clients")
 def get_billing_clients(desk_session: str | None = Cookie(default=None)):
     user = current_user(desk_session)
-    require_staff(user)
+    require_finance(user)
     with db() as conn:
         clients = []
         for o in conn.execute("SELECT * FROM organizations ORDER BY name").fetchall():
@@ -3485,7 +4755,7 @@ def update_client_balance(conn, client_type: str, client_id: int, new_balance_mi
 @app.patch("/api/billing/clients/{client_type}/{client_id}")
 def update_billing_client(client_type: str, client_id: int, data: BillingRateUpdate, desk_session: str | None = Cookie(default=None)):
     user = current_user(desk_session)
-    require_dispatcher(user)
+    require_finance(user, write=True)
     with db() as conn:
         if client_type == "org":
             conn.execute("""
@@ -3511,7 +4781,7 @@ def update_billing_client(client_type: str, client_id: int, data: BillingRateUpd
 @app.post("/api/billing/deposit")
 def create_billing_deposit(data: BillingDepositCreate, desk_session: str | None = Cookie(default=None)):
     user = current_user(desk_session)
-    require_dispatcher(user)
+    require_finance(user, write=True)
     with db() as conn:
         client = get_client_billing_info(conn, data.client_type, data.client_id)
         rate = client["hourly_rate_rub"]
@@ -3539,7 +4809,7 @@ def create_billing_deposit(data: BillingDepositCreate, desk_session: str | None 
 @app.get("/api/billing/unbilled-tickets")
 def get_unbilled_tickets(client_type: str, client_id: int, desk_session: str | None = Cookie(default=None)):
     user = current_user(desk_session)
-    require_staff(user)
+    require_finance(user)
     with db() as conn:
         client = get_client_billing_info(conn, client_type, client_id)
         rate = client["hourly_rate_rub"]
@@ -3578,6 +4848,8 @@ def get_unbilled_tickets(client_type: str, client_id: int, desk_session: str | N
 @app.get("/api/billing/invoices")
 def list_invoices(doc_type: str | None = None, status: str | None = None, desk_session: str | None = Cookie(default=None)):
     user = current_user(desk_session)
+    if user["role"] != "customer":
+        require_finance(user)
     with db() as conn:
         query = "SELECT i.*, CASE WHEN i.organization_id IS NOT NULL THEN o.name ELSE u.name END AS client_name FROM invoices i LEFT JOIN organizations o ON o.id = i.organization_id LEFT JOIN users u ON u.id = i.customer_id"
         conds = []
@@ -3608,25 +4880,38 @@ def list_invoices(doc_type: str | None = None, status: str | None = None, desk_s
 @app.post("/api/billing/invoices", status_code=201)
 def create_invoice_document(data: BillingDocumentCreate, desk_session: str | None = Cookie(default=None)):
     user = current_user(desk_session)
-    require_dispatcher(user)
+    require_finance(user, write=True)
     with db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
         client = get_client_billing_info(conn, data.client_type, data.client_id)
         rate = client["hourly_rate_rub"]
         stamp = now()
         year = datetime.now(timezone.utc).year
 
         if data.doc_type == "act":
-            if data.ticket_ids:
+            if data.ticket_ids is not None:
                 placeholders = ",".join("?" * len(data.ticket_ids))
-                tickets = conn.execute(f"SELECT * FROM tickets WHERE id IN ({placeholders}) AND act_invoice_id IS NULL", data.ticket_ids).fetchall()
+                selected = list(dict.fromkeys(data.ticket_ids))
+                condition, params = client_condition(data.client_type, data.client_id)
+                tickets = conn.execute(f"SELECT * FROM tickets WHERE id IN ({placeholders}) AND {condition} AND status IN ('done','closed') AND act_invoice_id IS NULL", (*data.ticket_ids, *params)).fetchall() if data.ticket_ids else []
+                if len(tickets) != len(selected):
+                    raise HTTPException(422, "Выбранные заявки должны принадлежать клиенту, быть завершены и не входить в другой акт")
             else:
                 if data.client_type == "org":
                     tickets = conn.execute("SELECT * FROM tickets WHERE organization_id=? AND status IN ('done','closed') AND act_invoice_id IS NULL", (data.client_id,)).fetchall()
                 else:
                     tickets = conn.execute("SELECT * FROM tickets WHERE customer_id=? AND organization_id IS NULL AND status IN ('done','closed') AND act_invoice_id IS NULL", (data.client_id,)).fetchall()
 
-            if not tickets:
-                raise HTTPException(422, "Не найдено завершенных задач с утвержденными часами для формирования акта")
+            service_cond, service_params = client_condition(data.client_type, data.client_id)
+            if data.service_entry_ids is not None:
+                ids = data.service_entry_ids or [0]
+                service_cond += f" AND id IN ({','.join('?' * len(ids))})"
+                service_params += tuple(ids)
+            services = conn.execute(f"""SELECT * FROM service_entries WHERE {service_cond} AND is_billable=1 AND act_invoice_id IS NULL
+                ORDER BY occurred_at, id""", service_params).fetchall()
+
+            if not tickets and not services:
+                raise HTTPException(422, "Не найдено завершенных задач или часов сопровождения для формирования акта")
 
             items = []
             total_mins = 0
@@ -3649,6 +4934,19 @@ def create_invoice_document(data: BillingDocumentCreate, desk_session: str | Non
                     "sum_rub": cost
                 })
 
+            service_mins = sum(s["minutes"] for s in services)
+            if service_mins:
+                cost = round(service_mins / 60.0 * rate)
+                total_mins += service_mins
+                total_rub += cost
+                items.append({
+                    "title": SERVICE_ACT_TITLE,
+                    "minutes": service_mins,
+                    "hours": round(service_mins / 60.0, 2),
+                    "rate": rate,
+                    "sum_rub": cost
+                })
+
             if not items:
                 raise HTTPException(422, "Выбранные задачи не содержат согласованных часов")
 
@@ -3661,7 +4959,11 @@ def create_invoice_document(data: BillingDocumentCreate, desk_session: str | Non
             """, (number, client["customer_id"], client["organization_id"], total_rub, total_mins, rate, data.period_start, data.period_end, json.dumps(items, ensure_ascii=False), data.notes, user["id"], stamp))
             act_id = cursor.lastrowid
 
-            conn.execute(f"UPDATE tickets SET act_invoice_id=? WHERE id IN ({','.join('?'*len(ticket_ids_to_link))})", (act_id, *ticket_ids_to_link))
+            if ticket_ids_to_link:
+                conn.execute(f"UPDATE tickets SET act_invoice_id=? WHERE id IN ({','.join('?'*len(ticket_ids_to_link))})", (act_id, *ticket_ids_to_link))
+            if services:
+                conn.execute(f"UPDATE service_entries SET act_invoice_id=? WHERE id IN ({','.join('?'*len(services))})",
+                             (act_id, *(s["id"] for s in services)))
 
             new_bal = client["balance_minutes"] - total_mins
             update_client_balance(conn, data.client_type, data.client_id, new_bal)
@@ -3704,6 +5006,8 @@ def create_invoice_document(data: BillingDocumentCreate, desk_session: str | Non
 @app.get("/api/billing/invoices/{invoice_id}")
 def get_invoice_detail(invoice_id: int, desk_session: str | None = Cookie(default=None)):
     user = current_user(desk_session)
+    if user["role"] != "customer":
+        require_finance(user)
     with db() as conn:
         row = conn.execute("SELECT * FROM invoices WHERE id=?", (invoice_id,)).fetchone()
         if not row:
@@ -3723,6 +5027,8 @@ def get_invoice_detail(invoice_id: int, desk_session: str | None = Cookie(defaul
 @app.get("/api/billing/invoices/{invoice_id}/print")
 def print_invoice_document(invoice_id: int, desk_session: str | None = Cookie(default=None)):
     user = current_user(desk_session)
+    if user["role"] != "customer":
+        require_finance(user)
     with db() as conn:
         row = conn.execute("SELECT * FROM invoices WHERE id=?", (invoice_id,)).fetchone()
         if not row:
@@ -3746,22 +5052,26 @@ def print_invoice_document(invoice_id: int, desk_session: str | None = Cookie(de
 @app.patch("/api/billing/invoices/{invoice_id}/status")
 def update_invoice_status(invoice_id: int, data: BillingStatusUpdate, desk_session: str | None = Cookie(default=None)):
     user = current_user(desk_session)
+    require_finance(user, write=True)
     with db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
         row = conn.execute("SELECT * FROM invoices WHERE id=?", (invoice_id,)).fetchone()
         if not row:
             raise HTTPException(404, "Документ не найден")
 
-        if user["role"] == "customer":
-            if data.status != "paid" or row["status"] != "issued":
-                raise HTTPException(403, "Клиент может только подтвердить оплату выставленного счета")
-            if row["organization_id"]:
-                org = customer_organization(conn, user["id"])
-                if not org or org["id"] != row["organization_id"]:
-                    raise HTTPException(403, "Нет доступа")
-            elif row["customer_id"] != user["id"]:
-                raise HTTPException(403, "Нет доступа")
-        else:
-            require_dispatcher(user)
+        if data.status == 'paid' and row['doc_type'] != 'invoice':
+            raise HTTPException(422, "Акт нужно подписать, а не отмечать оплаченным")
+        if data.status == 'signed':
+            if row['doc_type'] != 'act' or row['status'] != 'issued':
+                raise HTTPException(409, "Подписать можно только действующий акт")
+            conn.execute("UPDATE invoices SET signed_at=COALESCE(signed_at,?),signed_by_id=COALESCE(signed_by_id,?) WHERE id=?", (now(),user['id'],invoice_id))
+            return {"ok": True, "status": "issued", "signature_status": "signed"}
+        if row['status'] == data.status:
+            return {"ok": True, "status": row['status']}
+        if row['status'] == 'cancelled' or data.status == 'issued':
+            raise HTTPException(409, "Завершённый документ нельзя выставить повторно. Создайте новый")
+        if row['doc_type'] == 'invoice' and row['status'] == 'paid':
+            raise HTTPException(409, "Оплаченный счёт нельзя аннулировать без возврата платежа")
 
         old_status = row["status"]
         new_status = data.status
@@ -3786,6 +5096,7 @@ def update_invoice_status(invoice_id: int, data: BillingStatusUpdate, desk_sessi
         elif new_status == "cancelled" and old_status != "cancelled":
             if row["doc_type"] == "act":
                 conn.execute("UPDATE tickets SET act_invoice_id=NULL WHERE act_invoice_id=? ", (invoice_id,))
+                conn.execute("UPDATE service_entries SET act_invoice_id=NULL WHERE act_invoice_id=?", (invoice_id,))
                 c_type = "org" if row["organization_id"] else "user"
                 c_id = row["organization_id"] if row["organization_id"] else row["customer_id"]
                 client = get_client_billing_info(conn, c_type, c_id)
@@ -3804,6 +5115,770 @@ def update_invoice_status(invoice_id: int, data: BillingStatusUpdate, desk_sessi
         return {"ok": True, "status": new_status}
 
 
+# ==============================================================================
+# Взаимодействие с клиентом: «Ждём от вас», напоминания, почта и ежемесячная сводка
+# ==============================================================================
+
+def env_int(name, default):
+    try:
+        return int(os.getenv(name, str(default)))
+    except ValueError:
+        return default
+
+
+def reminder_settings():
+    return {"first_hours": env_int("REMINDER_FIRST_HOURS", 48), "repeat_hours": env_int("REMINDER_REPEAT_HOURS", 72),
+            "max": env_int("REMINDER_MAX", 3)}
+
+
+def local_tz():
+    return timezone(timedelta(hours=env_int("APP_UTC_OFFSET", 3)))
+
+
+def public_base():
+    return os.getenv("APP_PUBLIC_URL", "").rstrip("/") or "http://localhost:8000"
+
+
+def ru_plural(n, one, few, many):
+    a, b = abs(n) % 100, abs(n) % 10
+    return many if 10 < a < 20 else one if b == 1 else few if 2 <= b <= 4 else many
+
+
+def fmt_hours(minutes):
+    return f"{minutes / 60:.2f}".rstrip("0").rstrip(".").replace(".", ",") + " ч"
+
+
+def snippet(text, limit=160):
+    text = " ".join((text or "").split())
+    return text if len(text) <= limit else text[:limit].rstrip() + "…"
+
+
+def customer_visible_tickets(conn, user, extra=""):
+    return conn.execute(f"""SELECT t.* FROM tickets t WHERE ((t.customer_id=? AND t.visibility!='organization')
+        OR (t.visibility='organization' AND t.organization_id IN (SELECT organization_id FROM organization_members WHERE user_id=?)))
+        {extra} ORDER BY t.updated_at DESC, t.id DESC""", (user["id"], user["id"])).fetchall()
+
+
+def last_status_event(conn, ticket_id, status):
+    return conn.execute("""SELECT id,created_at FROM ticket_events WHERE ticket_id=? AND kind='status' AND new_value=?
+        ORDER BY id DESC LIMIT 1""", (ticket_id, status)).fetchone()
+
+
+def customer_pending_actions(conn, user):
+    """Всё, что тормозит работу по вине клиента: решения по оценкам и часам, приёмка и ответы на вопросы команды."""
+    if user["role"] != "customer":
+        return []
+    items = []
+    for t in customer_visible_tickets(conn, user, "AND t.status!='closed'"):
+        base = {"ticket_id": t["id"], "title": t["title"]}
+        if customer_can_decide(conn, t, user):
+            estimate = latest_estimate(conn, t["id"])
+            if estimate and estimate["state"] == "pending" and estimate["effort_minutes"] is not None:
+                items.append({**base, "kind": "estimate", "ref_id": estimate["id"], "since": estimate["created_at"],
+                              "effort_minutes": estimate["effort_minutes"],
+                              "action": "Одобрите оценку",
+                              "detail": f"Версия {estimate['version']} · {fmt_hours(estimate['effort_minutes'])}"})
+            for request in conn.execute("SELECT * FROM hour_requests WHERE ticket_id=? AND state='pending'", (t["id"],)):
+                items.append({**base, "kind": "hours", "ref_id": request["id"], "since": request["created_at"],
+                              "action": "Согласуйте дополнительные часы",
+                              "detail": f"+{fmt_hours(request['minutes'])}: {snippet(request['reason'], 120)}"})
+            if t["status"] == "done":
+                event = last_status_event(conn, t["id"], "done")
+                items.append({**base, "kind": "acceptance", "ref_id": event["id"] if event else 0,
+                              "since": event["created_at"] if event else t["updated_at"],
+                              "action": "Проверьте и примите работу", "detail": "Работа выполнена и ждёт вашей приёмки"})
+        if t["status"] == "waiting" and customer_can_write_ticket(conn, t, user):
+            event = last_status_event(conn, t["id"], "waiting")
+            since = event["created_at"] if event else t["updated_at"]
+            answered = conn.execute("""SELECT 1 FROM messages m JOIN users u ON u.id=m.author_id
+                WHERE m.ticket_id=? AND u.role='customer' AND m.created_at>?""", (t["id"], since)).fetchone()
+            if not answered:
+                question = conn.execute("""SELECT m.body FROM messages m JOIN users u ON u.id=m.author_id
+                    WHERE m.ticket_id=? AND u.role!='customer' ORDER BY m.id DESC LIMIT 1""", (t["id"],)).fetchone()
+                items.append({**base, "kind": "answer", "ref_id": event["id"] if event else 0, "since": since,
+                              "action": "Ответьте на вопрос команды",
+                              "detail": snippet(question["body"]) if question else "Команде нужна информация от вас"})
+    return sorted(items, key=lambda item: item["since"])
+
+
+@app.post("/api/estimates/approve")
+def approve_estimates(data: BulkEstimateApproval, desk_session: str | None = Cookie(default=None)):
+    """Одобрить сразу несколько оценок. Всё или ничего: если одна уже изменилась, клиент увидит актуальный список."""
+    user = current_user(desk_session)
+    with db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        approved = []
+        for estimate_id in dict.fromkeys(data.estimate_ids):
+            row = conn.execute("SELECT ticket_id FROM estimates WHERE id=?", (estimate_id,)).fetchone()
+            if not row:
+                raise HTTPException(409, "Оценка уже изменена или рассмотрена")
+            decide_estimate_service(conn, user, row["ticket_id"], EstimateDecision(estimate_id=estimate_id, action="approve"))
+            approved.append(row["ticket_id"])
+        return {"approved": len(approved), "ticket_ids": approved}
+
+
+@app.get("/api/ticket-templates")
+def ticket_templates(desk_session: str | None = Cookie(default=None)):
+    user = current_user(desk_session)
+    require_staff(user)
+    with db() as conn:
+        return [dict(row) for row in conn.execute("SELECT * FROM ticket_templates ORDER BY name COLLATE NOCASE, id")]
+
+
+@app.post("/api/ticket-templates", status_code=201)
+def create_ticket_template(data: TicketTemplateCreate, desk_session: str | None = Cookie(default=None)):
+    user = current_user(desk_session)
+    require_staff(user)
+    with db() as conn:
+        cursor = conn.execute("""INSERT INTO ticket_templates(name,title,description,service_type,effort_minutes,
+            estimate_note,created_by_id,created_at) VALUES(?,?,?,?,?,?,?,?)""",
+            (" ".join(data.name.split()), data.title.strip(), data.description.strip(), data.service_type,
+             data.effort_minutes, data.estimate_note.strip(), user["id"], now()))
+        return dict(conn.execute("SELECT * FROM ticket_templates WHERE id=?", (cursor.lastrowid,)).fetchone())
+
+
+@app.delete("/api/ticket-templates/{template_id}")
+def delete_ticket_template(template_id: int, desk_session: str | None = Cookie(default=None)):
+    user = current_user(desk_session)
+    require_staff(user)
+    with db() as conn:
+        row = conn.execute("SELECT created_by_id FROM ticket_templates WHERE id=?", (template_id,)).fetchone()
+        if not row:
+            raise HTTPException(404, "Шаблон не найден")
+        if row["created_by_id"] != user["id"] and user["role"] != "admin" and not user["is_manager"]:
+            raise HTTPException(403, "Удалить шаблон может автор или руководитель")
+        conn.execute("DELETE FROM ticket_templates WHERE id=?", (template_id,))
+        return {"deleted": template_id}
+
+
+@app.get("/api/waiting-on-me")
+def waiting_on_me(desk_session: str | None = Cookie(default=None)):
+    user = current_user(desk_session)
+    with db() as conn:
+        return customer_pending_actions(conn, user)
+
+
+REMINDER_TEXT = {"estimate": "ждёт вашего решения по оценке", "hours": "ждёт согласования дополнительных часов",
+                 "acceptance": "ждёт приёмки работы", "answer": "ждёт вашего ответа"}
+
+
+def run_reminders(at: datetime | None = None) -> int:
+    """Напоминает клиенту о его шагах: первый раз через REMINDER_FIRST_HOURS, затем не чаще REMINDER_REPEAT_HOURS.
+
+    После последнего напоминания ответственный узнаёт, что клиент молчит, и может предложить закрыть заявку.
+    """
+    at = at or datetime.now(timezone.utc)
+    cfg = reminder_settings()
+    if cfg["max"] <= 0:
+        return 0
+    sent = 0
+    with db() as conn:
+        customers = conn.execute("SELECT * FROM users WHERE role='customer' AND active=1").fetchall()
+    for user in customers:
+        with db() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            for item in customer_pending_actions(conn, user):
+                age_hours = (at - datetime.fromisoformat(item["since"])).total_seconds() / 3600
+                key = (user["id"], item["ticket_id"], item["kind"], item["ref_id"])
+                row = conn.execute("""SELECT count,last_sent_at FROM customer_reminders
+                    WHERE user_id=? AND ticket_id=? AND kind=? AND ref_id=?""", key).fetchone()
+                if row:
+                    since_last = (at - datetime.fromisoformat(row["last_sent_at"])).total_seconds() / 3600
+                    if row["count"] >= cfg["max"] or since_last < cfg["repeat_hours"]:
+                        continue
+                elif age_hours < cfg["first_hours"]:
+                    continue
+                count = (row["count"] if row else 0) + 1
+                days = max(1, int(age_hours // 24))
+                waited = f"{days} {ru_plural(days, 'день', 'дня', 'дней')}"
+                final = count >= cfg["max"]
+                text = f"Напоминание: заявка №{item['ticket_id']} {REMINDER_TEXT[item['kind']]} уже {waited}"
+                if final and item["kind"] == "answer":
+                    text += ". Если задача уже неактуальна, напишите — закроем заявку"
+                notify(conn, user["id"], item["ticket_id"], "reminder", text)
+                conn.execute("""INSERT INTO customer_reminders(user_id,ticket_id,kind,ref_id,count,last_sent_at) VALUES(?,?,?,?,?,?)
+                    ON CONFLICT(user_id,ticket_id,kind,ref_id) DO UPDATE SET count=excluded.count,last_sent_at=excluded.last_sent_at""",
+                             (*key, count, at.isoformat()))
+                if final and item["kind"] in ("answer", "acceptance"):
+                    ticket = conn.execute("SELECT assignee_id FROM tickets WHERE id=?", (item["ticket_id"],)).fetchone()
+                    silent = (f"Заказчик не принимает работу по заявке №{item['ticket_id']} уже {waited} — уточните или закройте заявку"
+                              if item["kind"] == "acceptance" else
+                              f"Заказчик не отвечает по заявке №{item['ticket_id']} уже {waited} — можно предложить закрыть заявку")
+                    for recipient in ({ticket["assignee_id"]} - {None}) or dispatcher_ids(conn):
+                        notify(conn, recipient, item["ticket_id"], "customer_silent", silent)
+                sent += 1
+    return sent
+
+
+# ---------- Почта: настройки ----------
+
+def email_preferences(conn, user):
+    row = conn.execute("SELECT * FROM email_preferences WHERE user_id=?", (user["id"],)).fetchone()
+    customer = user["role"] == "customer"
+    # По умолчанию письма получают заказчики: команда работает в кабинете и получает push.
+    return {"notify": bool(row["notify"]) if row else customer,
+            "digest": bool(row["digest"]) if row and customer else customer,
+            "digest_emails": [e for e in (row["digest_emails"] if row else "").split(",") if e] if customer else [],
+            "email": user["email"], "available": mailer.enabled(), "replies": inbound_enabled()}
+
+
+def inbound_enabled():
+    return mailer.imap_configured() or bool(os.getenv("EMAIL_INBOUND_SECRET", "").strip())
+
+
+@app.get("/api/email/preferences")
+def get_email_preferences(desk_session: str | None = Cookie(default=None)):
+    user = current_user(desk_session)
+    with db() as conn:
+        return email_preferences(conn, user)
+
+
+@app.put("/api/email/preferences")
+def update_email_preferences(data: EmailPreferencesUpdate, desk_session: str | None = Cookie(default=None)):
+    user = current_user(desk_session)
+    customer = user["role"] == "customer"
+    extra = []
+    for raw in data.digest_emails if customer else []:
+        if raw.strip():
+            address = clean_email(raw)
+            if address != user["email"] and address not in extra:
+                extra.append(address)
+    with db() as conn:
+        conn.execute("""INSERT INTO email_preferences(user_id,notify,digest,digest_emails,updated_at) VALUES(?,?,?,?,?)
+            ON CONFLICT(user_id) DO UPDATE SET notify=excluded.notify,digest=excluded.digest,
+            digest_emails=excluded.digest_emails,updated_at=excluded.updated_at""",
+                     (user["id"], int(data.notify), int(data.digest and customer), ",".join(extra), now()))
+        return email_preferences(conn, user)
+
+
+@app.post("/api/email/test")
+def send_test_email(desk_session: str | None = Cookie(default=None)):
+    user = current_user(desk_session)
+    if not mailer.enabled():
+        raise HTTPException(409, "Почта пока не настроена администратором")
+    body = "Письма от кабинета доходят до вас. Уведомления о заявках будут приходить на этот адрес."
+    with db() as conn:
+        queue_email(conn, user["id"], user["email"], "test", "Проверка почты",
+                    body, email_layout("Почта работает", f"<p>{html.escape(body)}</p>", [("Открыть кабинет", public_base() + "/")]))
+    return {"ok": True, "email": user["email"]}
+
+
+# ---------- Почта: очередь ----------
+
+def queue_email(conn, user_id, to_addr, kind, subject, text_body, html_body, delay=0):
+    conn.execute("""INSERT INTO email_outbox(user_id,to_addr,kind,subject,text_body,html_body,available_at,created_at)
+        VALUES(?,?,?,?,?,?,?,?)""", (user_id, to_addr, kind, subject, text_body, html_body, time.time() + delay, now()))
+
+
+def queue_notification_email(conn, user_id, target, record_id, kind, text, notification_id):
+    """Письмо о событии уходит с задержкой и только если человек не увидел событие в кабинете.
+
+    События одной переписки, пришедшие за время задержки, собираются в одно письмо.
+    """
+    if not mailer.enabled():
+        return
+    user = conn.execute("SELECT * FROM users WHERE id=? AND active=1", (user_id,)).fetchone()
+    if not user or not email_preferences(conn, user)["notify"]:
+        return
+    event = {"kind": kind, "text": text, "notification_id": notification_id}
+    pending = conn.execute("""SELECT id,payload FROM email_outbox WHERE user_id=? AND kind='notification' AND state='pending'
+        AND json_extract(payload,'$.target')=? AND json_extract(payload,'$.record_id')=? ORDER BY id DESC LIMIT 1""",
+                           (user_id, target, record_id)).fetchone()
+    if pending:
+        payload = json.loads(pending["payload"])
+        payload["events"] = (payload["events"] + [event])[-20:]
+        conn.execute("UPDATE email_outbox SET payload=? WHERE id=?", (json.dumps(payload, ensure_ascii=False), pending["id"]))
+        return
+    payload = {"target": target, "record_id": record_id, "events": [event]}
+    conn.execute("""INSERT INTO email_outbox(user_id,to_addr,kind,payload,available_at,created_at) VALUES(?,?,?,?,?,?)""",
+                 (user_id, user["email"], "notification", json.dumps(payload, ensure_ascii=False),
+                  time.time() + env_int("EMAIL_DELAY_SECONDS", 120), now()))
+
+
+def claim_email():
+    stamp = time.time()
+    with db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute("UPDATE email_outbox SET state='pending',lease_token=NULL WHERE state='sending' AND lease_until<?", (stamp,))
+        row = conn.execute("SELECT * FROM email_outbox WHERE state='pending' AND available_at<=? ORDER BY id LIMIT 1",
+                           (stamp,)).fetchone()
+        if not row:
+            return None
+        lease = secrets.token_hex(12)
+        conn.execute("UPDATE email_outbox SET state='sending',lease_until=?,lease_token=?,attempts=attempts+1 WHERE id=?",
+                     (stamp + 120, lease, row["id"]))
+        return {**dict(row), "lease_token": lease, "attempts": row["attempts"] + 1}
+
+
+def finish_email(job, state, error=None, retry_in=0):
+    with db() as conn:
+        conn.execute("""UPDATE email_outbox SET state=?,last_error=?,lease_token=NULL,available_at=?,
+            sent_at=CASE WHEN ?='sent' THEN ? ELSE sent_at END WHERE id=? AND lease_token=?""",
+                     (state, error, time.time() + retry_in, state, now(), job["id"], job["lease_token"]))
+
+
+def deliver_emails(limit=20) -> int:
+    processed = 0
+    while processed < limit:
+        job = claim_email()
+        if not job:
+            break
+        processed += 1
+        try:
+            with db() as conn:
+                message = render_outbox_email(conn, job)
+            if message is None:
+                finish_email(job, "skipped")
+                continue
+            mailer.send(message, DB_PATH.parent / "mail_outbox")
+            finish_email(job, "sent")
+        except Exception as exc:
+            terminal = mailer.permanent_error(exc) or job["attempts"] >= 6
+            finish_email(job, "failed" if terminal else "pending", f"{type(exc).__name__}: {exc}"[:300],
+                         min(60 * 2 ** job["attempts"], 3600))
+    return processed
+
+
+# ---------- Почта: оформление писем ----------
+
+def email_layout(title, body_html, buttons=(), footer=""):
+    links = "".join(
+        f'<a href="{html.escape(url)}" style="display:inline-block;margin:4px 8px 4px 0;padding:11px 18px;border-radius:9px;'
+        f'background:{"#137b69" if index == 0 else "#e8f1ee"};color:{"#ffffff" if index == 0 else "#123b36"};'
+        f'font-weight:600;text-decoration:none">{html.escape(label)}</a>'
+        for index, (label, url) in enumerate(buttons))
+    return f"""<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
+<meta name="color-scheme" content="light"><title>{html.escape(title)}</title></head>
+<body style="margin:0;background:#f3f6f5;font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;color:#17302c">
+<div style="max-width:600px;margin:0 auto;padding:24px 16px">
+<div style="font-weight:800;font-size:18px;margin-bottom:16px;color:#122527">Codari<span style="color:#137b69">.</span></div>
+<div style="background:#ffffff;border:1px solid #dbe5e2;border-radius:14px;padding:24px">
+<h1 style="font-size:20px;line-height:1.3;margin:0 0 14px">{html.escape(title)}</h1>
+<div style="font-size:15px;line-height:1.55">{body_html}</div>
+{f'<div style="margin-top:20px">{links}</div>' if links else ''}
+</div>
+<div style="font-size:12px;line-height:1.5;color:#6b7f7a;margin-top:16px">{footer}</div>
+</div></body></html>"""
+
+
+def quote_html(author, body):
+    text = html.escape(snippet(body, 1200)).replace("\n", "<br>")
+    return (f'<div style="margin:12px 0;padding:10px 14px;border-left:3px solid #137b69;background:#f3f8f6;border-radius:6px">'
+            f'<div style="font-size:12px;color:#5c716c;margin-bottom:4px">{html.escape(author)}</div>{text}</div>')
+
+
+def email_token(conn, user_id, purpose, action=None, ticket_id=None, chat_id=None, ref_id=None, days=14):
+    raw = secrets.token_urlsafe(24)
+    conn.execute("""INSERT INTO email_tokens(token_hash,user_id,purpose,action,ticket_id,chat_id,ref_id,expires_at,created_at)
+        VALUES(?,?,?,?,?,?,?,?,?)""", (token_hash(raw), user_id, purpose, action, ticket_id, chat_id, ref_id,
+                                       (datetime.now(timezone.utc) + timedelta(days=days)).isoformat(), now()))
+    return raw
+
+
+def action_url(conn, user_id, action, **target):
+    return f"{public_base()}/email/a/{email_token(conn, user_id, 'action', action, **target)}"
+
+
+def render_outbox_email(conn, job):
+    if job["kind"] != "notification":
+        unsubscribe = None
+        if job["kind"] == "digest" and job["user_id"]:
+            unsubscribe = action_url(conn, job["user_id"], "unsubscribe_digest", days=60)
+        headers = {"List-Unsubscribe": f"<{unsubscribe}>"} if unsubscribe else {}
+        return mailer.build([job["to_addr"]], job["subject"], job["text_body"], job["html_body"], headers=headers)
+    user = conn.execute("SELECT * FROM users WHERE id=? AND active=1", (job["user_id"],)).fetchone()
+    if not user or not email_preferences(conn, user)["notify"]:
+        return None
+    payload = json.loads(job["payload"])
+    target, record_id = payload["target"], payload["record_id"]
+    table = "notifications" if target == "ticket" else "chat_notifications"
+    events = [e for e in payload["events"] if conn.execute(f"SELECT 1 FROM {table} WHERE id=? AND read_at IS NULL",
+                                                           (e["notification_id"],)).fetchone()]
+    if not events:
+        return None
+    try:
+        record = ticket_for(conn, record_id, user) if target == "ticket" else chat_for(conn, record_id, user)
+    except HTTPException:
+        return None
+    record_id = record["id"]
+    customer = user["role"] == "customer"
+    if target == "ticket":
+        heading = f"Заявка №{record_id}: {record['title']}"
+        can_write = record["status"] != "closed" and customer_can_write_ticket(conn, record, user)
+        open_url = f"{public_base()}/#ticket/{record_id}"
+        messages_sql = f"{TICKET_MESSAGE_SELECT} WHERE m.ticket_id=? AND m.author_id!=? AND m.id>? ORDER BY m.id DESC LIMIT 5"
+    else:
+        heading = "Общий чат с командой" if customer else f"Общий чат: {record['customer_name']}"
+        can_write = True
+        open_url = f"{public_base()}/#chat/{record_id}"
+        messages_sql = f"{CHAT_MESSAGE_SELECT} WHERE m.chat_id=? AND m.author_id!=? AND m.id>? ORDER BY m.id DESC LIMIT 5"
+    read = conn.execute("SELECT last_read_id FROM message_reads WHERE kind=? AND record_id=? AND user_id=?",
+                        (target, record_id, user["id"])).fetchone()
+    unread = list(reversed(conn.execute(messages_sql, (record_id, user["id"], read["last_read_id"] if read else 0)).fetchall()))
+    if not any(e["kind"] == "message" for e in events):
+        unread = []
+    events = [{**e, "text": customer_notification_text(e["text"], user)} for e in events]
+    text_lines = [heading, ""] + [f"• {e['text']}" for e in events]
+    body = "".join(f"<p style=\"margin:0 0 6px\">• {html.escape(e['text'])}</p>" for e in events)
+    for message in unread:
+        message = message_dict(message, user)
+        body += quote_html(f"{message['author_name']} · {format_ru_date(message['created_at']).removesuffix(' г.')}", message["body"])
+        text_lines += ["", f"{message['author_name']}:", message["body"]]
+    buttons = []
+    if customer and target == "ticket" and customer_can_decide(conn, record, user):
+        estimate = latest_estimate(conn, record_id)
+        if estimate and estimate["state"] == "pending" and estimate["effort_minutes"] is not None and record["status"] != "closed":
+            body += (f"<p>Оценка, версия {estimate['version']}: <strong>{fmt_hours(estimate['effort_minutes'])}</strong>"
+                     f"{'<br>' + html.escape(snippet(estimate['note'], 600)) if estimate['note'] else ''}</p>")
+            buttons.append(("Одобрить оценку", action_url(conn, user["id"], "approve_estimate", ticket_id=record_id, ref_id=estimate["id"])))
+        hours_request = conn.execute("SELECT * FROM hour_requests WHERE ticket_id=? AND state='pending' ORDER BY id DESC LIMIT 1",
+                                     (record_id,)).fetchone()
+        if hours_request and record["status"] in ("working", "waiting"):
+            body += f"<p>Запрошено ещё <strong>{fmt_hours(hours_request['minutes'])}</strong>: {html.escape(snippet(hours_request['reason'], 400))}</p>"
+            buttons.append(("Одобрить часы", action_url(conn, user["id"], "approve_hours", ticket_id=record_id, ref_id=hours_request["id"])))
+        if record["status"] == "done":
+            buttons.append(("Принять работу", action_url(conn, user["id"], "accept_work", ticket_id=record_id)))
+        if customer_can_decline(conn, record, user):
+            buttons.append(("Заявка не нужна", action_url(conn, user["id"], "decline_ticket", ticket_id=record_id)))
+    buttons.append(("Открыть в кабинете", open_url))
+    text_lines += ["", f"Открыть в кабинете: {open_url}"]
+    message_id = None
+    footer = ""
+    if can_write and inbound_enabled() and mailer.reply_address():
+        reply = email_token(conn, user["id"], "reply", ticket_id=record_id if target == "ticket" else None,
+                            chat_id=record_id if target == "chat" else None, days=90)
+        message_id = f"<r.{reply}@{mailer.sender_domain()}>"
+        footer += "Ответьте на это письмо — текст попадёт в переписку. "
+        text_lines += ["", "Ответьте на это письмо — текст попадёт в переписку.", f"ref:{reply}"]
+    unsubscribe = action_url(conn, user["id"], "unsubscribe", days=60)
+    footer += (f'Вы получили письмо, потому что не открывали кабинет после этого события. '
+               f'<a href="{html.escape(unsubscribe)}" style="color:#6b7f7a">Отключить письма</a>')
+    if message_id:
+        footer += f'<span style="color:#f3f6f5;font-size:1px">ref:{message_id[3:-1].split("@")[0]}</span>'
+    subject = events[0]["text"] if len(events) == 1 else f"{heading}: {len(events)} {ru_plural(len(events), 'событие', 'события', 'событий')}"
+    thread = f"<thread.{target}.{record_id}.{user['id']}@{mailer.sender_domain()}>"
+    return mailer.build([user["email"]], subject, "\n".join(text_lines),
+                        email_layout(heading, body, buttons, footer), message_id=message_id,
+                        headers={"References": thread, "In-Reply-To": thread, "List-Unsubscribe": f"<{unsubscribe}>"})
+
+
+# ---------- Почта: действия из писем ----------
+
+EMAIL_ACTIONS = {"approve_estimate": "Одобрить оценку", "approve_hours": "Одобрить дополнительные часы",
+                 "accept_work": "Принять работу", "decline_ticket": "Отказаться от заявки", "unsubscribe": "Отключить письма об изменениях",
+                 "unsubscribe_digest": "Отключить ежемесячную сводку"}
+
+
+def email_action_page(title, text, button=None, status=200):
+    form = (f'<form method="post"><button type="submit" style="padding:12px 20px;border:0;border-radius:9px;background:#137b69;'
+            f'color:#fff;font-size:15px;font-weight:600;cursor:pointer">{html.escape(button)}</button></form>') if button else ""
+    return HTMLResponse(email_layout(title, f"<p>{html.escape(text)}</p>{form}", [] if button else [("Открыть кабинет", public_base() + "/")]),
+                        status_code=status, headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
+
+
+def email_action_token(conn, token):
+    row = conn.execute("SELECT * FROM email_tokens WHERE token_hash=? AND purpose='action'", (token_hash(token),)).fetchone()
+    if not row or row["expires_at"] < now():
+        return None, "Ссылка устарела. Откройте кабинет, чтобы продолжить."
+    if row["used_at"] and not row["action"].startswith("unsubscribe"):
+        return None, "Это действие уже выполнено по ссылке из письма."
+    user = conn.execute("SELECT * FROM users WHERE id=? AND active=1", (row["user_id"],)).fetchone()
+    if not user:
+        return None, "Учётная запись недоступна."
+    return (row, user), None
+
+
+def describe_email_action(conn, row):
+    if row["action"] == "approve_estimate":
+        estimate = conn.execute("SELECT * FROM estimates WHERE id=?", (row["ref_id"],)).fetchone()
+        return f"Одобрить оценку заявки №{row['ticket_id']}: версия {estimate['version']}, {fmt_hours(estimate['effort_minutes'] or 0)}? После одобрения команда приступит к работе."
+    if row["action"] == "approve_hours":
+        request = conn.execute("SELECT * FROM hour_requests WHERE id=?", (row["ref_id"],)).fetchone()
+        return f"Одобрить ещё {fmt_hours(request['minutes'])} по заявке №{row['ticket_id']}? {snippet(request['reason'], 300)}"
+    if row["action"] == "accept_work":
+        return f"Принять работу по заявке №{row['ticket_id']}? Заявка будет закрыта. Если нужна доработка, откройте кабинет и верните её с комментарием."
+    if row["action"] == "decline_ticket":
+        return f"Отказаться от заявки №{row['ticket_id']}? Она закроется без работы и оплаты, команда получит уведомление."
+    if row["action"] == "unsubscribe":
+        return "Письма о новых сообщениях и событиях по заявкам больше не будут приходить. Включить их снова можно в профиле."
+    return "Ежемесячная сводка по заявкам больше не будет приходить. Включить её снова можно в профиле."
+
+
+@app.get("/email/a/{token}")
+def email_action_confirm(token: str):
+    with db() as conn:
+        found, error = email_action_token(conn, token)
+        if error:
+            return email_action_page("Ссылка недоступна", error, status=410)
+        row, _ = found
+        return email_action_page(EMAIL_ACTIONS.get(row["action"], "Действие"), describe_email_action(conn, row),
+                                 "Подтвердить")
+
+
+@app.post("/email/a/{token}")
+def email_action_run(token: str):
+    with db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        found, error = email_action_token(conn, token)
+        if error:
+            return email_action_page("Ссылка недоступна", error, status=410)
+        row, user = found
+        try:
+            if row["action"] == "approve_estimate":
+                decide_estimate_service(conn, user, row["ticket_id"], EstimateDecision(estimate_id=row["ref_id"], action="approve"))
+                done = "Оценка одобрена — команда приступит к работе."
+            elif row["action"] == "approve_hours":
+                decide_hours_service(conn, user, row["ticket_id"], row["ref_id"], HourRequestDecision(action="approve"))
+                done = "Дополнительные часы одобрены."
+            elif row["action"] == "accept_work":
+                accept_work_service(conn, user, row["ticket_id"], AcceptanceDecision(action="accept"))
+                done = "Работа принята, заявка закрыта. Спасибо! Оценить работу команды можно в кабинете."
+            elif row["action"] == "decline_ticket":
+                decline_ticket_service(conn, user, row["ticket_id"], TicketDecline())
+                done = "Заявка закрыта — команда получила уведомление."
+            else:
+                column = "notify" if row["action"] == "unsubscribe" else "digest"
+                prefs = email_preferences(conn, user)
+                conn.execute("""INSERT INTO email_preferences(user_id,notify,digest,digest_emails,updated_at) VALUES(?,?,?,?,?)
+                    ON CONFLICT(user_id) DO UPDATE SET {0}=0,updated_at=excluded.updated_at""".format(column),
+                             (user["id"], 0 if column == "notify" else int(prefs["notify"]),
+                              0 if column == "digest" else int(prefs["digest"]), ",".join(prefs["digest_emails"]), now()))
+                done = "Готово. Настройки писем можно изменить в профиле кабинета."
+        except HTTPException as exc:
+            conn.execute("ROLLBACK")
+            return email_action_page("Не получилось", str(exc.detail), status=409)
+        conn.execute("UPDATE email_tokens SET used_at=? WHERE token_hash=?", (now(), token_hash(token)))
+        return email_action_page("Готово", done)
+
+
+# ---------- Почта: ответы клиентов ----------
+
+def process_inbound_email(raw: bytes) -> str:
+    """Ответ на письмо становится сообщением в той же переписке. Повторная доставка письма не создаёт копию."""
+    parsed = mailer.parse(raw)
+    message_id = parsed["message_id"] or "sha:" + hashlib.sha256(raw).hexdigest()
+    bounce = None
+    with db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        if conn.execute("SELECT 1 FROM email_inbound WHERE message_id=?", (message_id,)).fetchone():
+            return "duplicate"
+        result, user, kind, record = "ignored", None, None, None
+        token = mailer.reply_token(parsed)
+        row = conn.execute("SELECT * FROM email_tokens WHERE token_hash=? AND purpose='reply'",
+                           (token_hash(token),)).fetchone() if token else None
+        if parsed["auto_reply"]:
+            result = "auto_reply"
+        elif not row or row["expires_at"] < now():
+            result = "unknown_token"
+        else:
+            user = conn.execute("SELECT * FROM users WHERE id=? AND active=1", (row["user_id"],)).fetchone()
+            kind, record = ("ticket", row["ticket_id"]) if row["ticket_id"] else ("chat", row["chat_id"])
+            body = mailer.strip_quoted(parsed["body"])[:10000]
+            if not user or parsed["from"] != user["email"]:
+                result, user = "sender_mismatch", None
+            elif not body:
+                result = "empty"
+            else:
+                data = MessageCreate(body=body, request_id="mail-" + hashlib.sha256(message_id.encode()).hexdigest()[:40])
+                conn.execute("SAVEPOINT inbound")
+                try:
+                    if kind == "ticket":
+                        add_message_service(conn, user, record, data)
+                    else:
+                        add_chat_message_service(conn, user, record, data)
+                    result = "posted"
+                except HTTPException as exc:
+                    conn.execute("ROLLBACK TO inbound")
+                    result = f"rejected: {exc.detail}"
+                    bounce = exc.detail
+                finally:
+                    conn.execute("RELEASE inbound")
+        conn.execute("INSERT INTO email_inbound VALUES(?,?,?,?,?,?)",
+                     (message_id, user["id"] if user else None, kind, record, result, now()))
+        if bounce and user and mailer.enabled():
+            where = f"по заявке №{record}" if kind == "ticket" else "в общий чат"
+            text = f"Ваш ответ {where} не добавлен: {bounce}. Откройте кабинет, чтобы продолжить переписку."
+            queue_email(conn, user["id"], user["email"], "bounce", "Ответ не доставлен", text,
+                        email_layout("Ответ не доставлен", f"<p>{html.escape(text)}</p>",
+                                     [("Открыть кабинет", f"{public_base()}/#{kind}/{record}")]))
+    return result
+
+
+@app.post("/api/email/inbound")
+async def inbound_email_webhook(request: Request):
+    secret = os.getenv("EMAIL_INBOUND_SECRET", "").strip()
+    if not secret:
+        raise HTTPException(404, "Не найдено")
+    if not hmac.compare_digest(request.headers.get("x-inbound-secret", ""), secret):
+        raise HTTPException(403, "Неверный ключ")
+    raw = await request.body()
+    if not raw or len(raw) > 5_000_000:
+        raise HTTPException(413, "Письмо пустое или слишком большое")
+    return {"result": await asyncio.to_thread(process_inbound_email, raw)}
+
+
+# ---------- Ежемесячная сводка ----------
+
+MONTHS_NOMINATIVE = ["январь", "февраль", "март", "апрель", "май", "июнь", "июль", "август", "сентябрь", "октябрь", "ноябрь", "декабрь"]
+MONTHS_PREPOSITIONAL = ["январе", "феврале", "марте", "апреле", "мае", "июне", "июле", "августе", "сентябре", "октябре", "ноябре", "декабре"]
+
+
+def month_bounds(period: str):
+    if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", period or ""):
+        raise HTTPException(422, "Период указывается как ГГГГ-ММ")
+    year, month = map(int, period.split("-"))
+    tz = local_tz()
+    start = datetime(year, month, 1, tzinfo=tz)
+    end = datetime(year + (month == 12), month % 12 + 1, 1, tzinfo=tz)
+    return start.astimezone(timezone.utc).isoformat(), end.astimezone(timezone.utc).isoformat(), month
+
+
+def build_digest(conn, user, period):
+    start, end, month = month_bounds(period)
+    tickets = customer_visible_tickets(conn, user)
+    ids = [t["id"] for t in tickets]
+    marks = ",".join("?" * len(ids)) or "NULL"
+    finished_ids = {row["ticket_id"] for row in conn.execute(f"""SELECT DISTINCT ticket_id FROM ticket_events
+        WHERE ticket_id IN ({marks}) AND created_at>=? AND created_at<? AND
+        ((kind='status' AND new_value IN ('done','closed')) OR (kind='acceptance' AND new_value='accepted'))""", (*ids, start, end))}
+    finished = [t for t in tickets if t["id"] in finished_ids and t["status"] in ("done", "closed")]
+    created = [t for t in tickets if start <= t["created_at"] < end]
+    in_work = [t for t in tickets if t["status"] in ("new", "working", "waiting")]
+    logged = conn.execute(f"SELECT COALESCE(SUM(minutes),0) FROM time_entries WHERE ticket_id IN ({marks}) AND created_at>=? AND created_at<?",
+                          (*ids, start, end)).fetchone()[0]
+    meetings = conn.execute(f"""{MEETING_SUMMARY_SELECT} WHERE s.shared_at IS NOT NULL AND s.occurred_at>=? AND s.occurred_at<?
+        AND (s.ticket_id IN ({marks}) OR (s.ticket_id IS NULL AND s.customer_id=?)) ORDER BY s.occurred_at""",
+                            (start, end, *ids, user["id"])).fetchall()
+    return {"period": period, "month": month, "finished": finished, "created": created, "in_work": in_work,
+            "waiting": customer_pending_actions(conn, user), "logged_minutes": logged, "meetings": meetings}
+
+
+def render_digest(user, digest):
+    month = MONTHS_PREPOSITIONAL[digest["month"] - 1]
+    title = f"Работа по вашим заявкам в {month}"
+    status_names = {"new": "новая", "working": "в работе", "waiting": "ждёт вашего ответа", "done": "на проверке", "closed": "закрыта"}
+
+    def ticket_list(rows, extra=lambda t: ""):
+        items = "".join(f'<li style="margin:0 0 6px"><a href="{public_base()}/#ticket/{t["id"]}" style="color:#137b69">№{t["id"]}</a> '
+                        f'{html.escape(t["title"])}{extra(t)}</li>' for t in rows[:15])
+        more = f'<li style="color:#6b7f7a">и ещё {len(rows) - 15}</li>' if len(rows) > 15 else ""
+        return f'<ul style="padding-left:18px;margin:6px 0 16px">{items}{more}</ul>'
+
+    stats = [(len(digest["finished"]), "выполнено"), (len(digest["created"]), "новых"), (len(digest["in_work"]), "в работе")]
+    if digest["logged_minutes"]:
+        stats.append((fmt_hours(digest["logged_minutes"]), "работы"))
+    body = '<table role="presentation" style="width:100%;border-collapse:collapse;margin:0 0 18px"><tr>' + "".join(
+        f'<td style="padding:10px;background:#f3f8f6;border-radius:8px;text-align:center"><div style="font-size:22px;font-weight:800">{value}</div>'
+        f'<div style="font-size:12px;color:#5c716c">{label}</div></td>' for value, label in stats) + "</tr></table>"
+    text = [title, ""]
+    if digest["waiting"]:
+        body += "<h2 style=\"font-size:16px;margin:0 0 4px;color:#a3620a\">Ждём от вас</h2>"
+        body += '<ul style="padding-left:18px;margin:6px 0 16px">' + "".join(
+            f'<li style="margin:0 0 6px"><a href="{public_base()}/#ticket/{w["ticket_id"]}" style="color:#137b69">№{w["ticket_id"]}</a> '
+            f'{html.escape(w["action"])} — {html.escape(w["title"])}</li>' for w in digest["waiting"]) + "</ul>"
+        text += ["Ждём от вас:"] + [f"  №{w['ticket_id']} {w['action']} — {w['title']}" for w in digest["waiting"]] + [""]
+    if digest["finished"]:
+        body += '<h2 style="font-size:16px;margin:0 0 4px">Что сделано</h2>' + ticket_list(digest["finished"])
+        text += ["Что сделано:"] + [f"  №{t['id']} {t['title']}" for t in digest["finished"]] + [""]
+    if digest["in_work"]:
+        body += '<h2 style="font-size:16px;margin:0 0 4px">Что в работе</h2>' + ticket_list(
+            digest["in_work"], lambda t: f' <span style="color:#6b7f7a">· {status_names.get(t["status"], t["status"])}</span>')
+        text += ["Что в работе:"] + [f"  №{t['id']} {t['title']} · {status_names.get(t['status'], t['status'])}" for t in digest["in_work"]] + [""]
+    if digest["meetings"]:
+        body += '<h2 style="font-size:16px;margin:0 0 4px">Итоги встреч</h2>'
+        for meeting in digest["meetings"]:
+            label = f"{SERVICE_KIND_NAMES.get(meeting['kind'], 'встреча').capitalize()} {format_ru_date(meeting['occurred_at']).removesuffix(' г.')}"
+            body += quote_html(label, meeting["client_summary"] or "")
+            text += [label + ":", meeting["client_summary"] or "", ""]
+    if not (digest["waiting"] or digest["finished"] or digest["in_work"] or digest["meetings"]):
+        body += "<p>В этом месяце обращений не было. Если появится задача, создайте заявку в кабинете.</p>"
+    text += [f"Открыть кабинет: {public_base()}/"]
+    subject = f"Сводка по заявкам за {MONTHS_NOMINATIVE[digest['month'] - 1]}"
+    return subject, "\n".join(text), email_layout(title, body, [("Открыть кабинет", public_base() + "/")],
+                                                  "Сводка приходит раз в месяц. Отключить её можно в профиле кабинета.")
+
+
+def digest_has_activity(digest):
+    return bool(digest["finished"] or digest["created"] or digest["in_work"] or digest["waiting"] or digest["meetings"])
+
+
+def run_digests(at: datetime | None = None, force: bool = False) -> int:
+    """Первого числа рассылает клиентам сводку за прошедший месяц. Каждому — один раз за период."""
+    if not mailer.enabled():
+        return 0
+    local = (at or datetime.now(timezone.utc)).astimezone(local_tz())
+    if not force and (local.day != env_int("DIGEST_DAY", 1) or local.hour < 9):
+        return 0
+    previous = (local.replace(day=1) - timedelta(days=1))
+    period = f"{previous.year}-{previous.month:02d}"
+    sent = 0
+    with db() as conn:
+        customers = conn.execute("SELECT * FROM users WHERE role='customer' AND active=1").fetchall()
+    for user in customers:
+        with db() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            prefs = email_preferences(conn, user)
+            if not prefs["digest"] or conn.execute("SELECT 1 FROM digest_log WHERE user_id=? AND period=?",
+                                                   (user["id"], period)).fetchone():
+                continue
+            conn.execute("INSERT INTO digest_log VALUES(?,?,?)", (user["id"], period, now()))
+            digest = build_digest(conn, user, period)
+            if not digest_has_activity(digest):
+                continue
+            subject, text, html_body = render_digest(user, digest)
+            for address in [user["email"], *prefs["digest_emails"]]:
+                queue_email(conn, user["id"], address, "digest", subject, text, html_body)
+            sent += 1
+    return sent
+
+
+@app.get("/api/digest/preview")
+def digest_preview(period: str | None = None, desk_session: str | None = Cookie(default=None)):
+    user = current_user(desk_session)
+    if user["role"] != "customer":
+        raise HTTPException(403, "Сводка готовится для заказчиков")
+    local = datetime.now(local_tz())
+    with db() as conn:
+        digest = build_digest(conn, user, period or f"{local.year}-{local.month:02d}")
+    return HTMLResponse(render_digest(user, digest)[2], headers={"Cache-Control": "no-store"})
+
+
+# ---------- Фоновые задачи ----------
+
+def run_background_tick(last: dict):
+    stamp = time.time()
+    if mailer.enabled():
+        deliver_emails()
+    if stamp - last.get("reminders", 0) >= 600:
+        last["reminders"] = stamp
+        start, _, end = os.getenv("REMINDER_HOURS", "9-20").partition("-")
+        if env_int("REMINDER_FIRST_HOURS", 48) >= 0 and int(start or 9) <= datetime.now(local_tz()).hour < int(end or 20):
+            run_reminders()
+    if stamp - last.get("digest", 0) >= 1800:
+        last["digest"] = stamp
+        run_digests()
+    if mailer.imap_configured() and stamp - last.get("imap", 0) >= env_int("IMAP_POLL_SECONDS", 60):
+        last["imap"] = stamp
+        mailer.fetch_unseen(process_inbound_email)
+
+
+async def background_jobs():
+    last = {}
+    while True:
+        try:
+            await asyncio.to_thread(run_background_tick, last)
+        except Exception as exc:
+            print(f"background job failed: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
+        await asyncio.sleep(20)
+
+
+@app.on_event("startup")
+async def start_background_jobs():
+    # Отключается BACKGROUND_JOBS=0, например если задачи запускаются отдельным процессом.
+    if os.getenv("BACKGROUND_JOBS", "1").strip() != "0":
+        app.state.background_jobs = asyncio.create_task(background_jobs())
+
+
 def bootstrap_admin():
     name = os.getenv("ADMIN_NAME", "Администратор")
     email = os.getenv("ADMIN_EMAIL")
@@ -3816,6 +5891,8 @@ def bootstrap_admin():
         create_user(conn, name, email, password, "admin")
     print("Admin created")
 
+
+team_management.install_routes(app, sys.modules[__name__])
 
 from bot.service import BotEngine
 from bot.routes import install_bot_routes

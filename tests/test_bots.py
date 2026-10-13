@@ -93,6 +93,23 @@ class Bots(unittest.TestCase):
             rows = conn.execute("SELECT payload FROM bot_outbox WHERE provider=? ORDER BY id DESC", (provider,)).fetchall()
             return next(json.loads(r["payload"]) for r in rows if not json.loads(r["payload"]).get("ack"))
 
+    def test_customer_bot_uses_support_identity_in_history_and_notifications(self):
+        for provider in ("telegram", "max"):
+            link = self.link(provider)
+            with desk.db() as conn:
+                conn.execute("UPDATE bot_preferences SET channel='both' WHERE user_id=?", (self.user["id"],))
+            ticket = self.client.post("/api/tickets", json={"title": "Проверка подписи", "description": "Ответ службы поддержки"}).json()
+            self.admin.post(f"/api/tickets/{ticket['id']}/messages", json={"body": "Проверяем заявку", "request_id": f"privacy-{provider}"})
+            payload = self.last_payload(provider)
+            self.assertIn("Служба поддержки", payload["text"])
+            self.assertNotIn("Менеджер", payload["text"])
+            with desk.db() as conn:
+                self.engine.history(conn, link, self.user, "ticket", ticket["id"])
+                payloads = [json.loads(r["payload"]) for r in conn.execute("SELECT payload FROM bot_outbox WHERE provider=?", (provider,))]
+            history = [p["text"] for p in payloads if "Проверяем заявку" in p.get("text", "")]
+            self.assertTrue(history)
+            self.assertTrue(all("Служба поддержки" in text and "Менеджер" not in text for text in history))
+
     def button(self, text, provider="telegram"):
         return next(b["token"] for row in self.last_payload(provider)["buttons"] for b in row if b["text"] == text)
 
@@ -113,6 +130,38 @@ class Bots(unittest.TestCase):
         result = self.admin.post(f"/api/tickets/{ticket}/estimates", json={"effort_minutes": 150, "assessment_minutes": 10, "note": "Настроим доступ"})
         self.assertEqual(result.status_code, 201, result.text)
         return result.json()["id"]
+
+    def test_customer_accepts_or_returns_work_in_bot(self):
+        self.link()
+        ticket = self.ticket()
+        estimate = self.estimate(ticket)
+        self.client.post(f"/api/tickets/{ticket}/estimates/decision", json={"estimate_id": estimate, "action": "approve"})
+        self.admin.patch(f"/api/tickets/{ticket}/status", json={"status": "working"})
+        self.admin.post(f"/api/tickets/{ticket}/time-entries", json={"minutes": 60, "note": "Готово"})
+        self.admin.patch(f"/api/tickets/{ticket}/status", json={"status": "done"})
+        self.show_ticket(ticket)
+        self.click("Вернуть на доработку")
+        self.send(text="Не работает экспорт")
+        self.assertEqual(self.sql("SELECT status FROM tickets WHERE id=?", (ticket,))[0]["status"], "working")
+        self.assertEqual(self.sql("SELECT body FROM messages WHERE ticket_id=? ORDER BY id DESC", (ticket,))[0]["body"], "Возврат на доработку: Не работает экспорт")
+        self.admin.patch(f"/api/tickets/{ticket}/status", json={"status": "done"})
+        self.show_ticket(ticket)
+        self.click("Принять работу")
+        self.click("Принять")
+        self.assertEqual(self.sql("SELECT status FROM tickets WHERE id=?", (ticket,))[0]["status"], "closed")
+
+    def test_customer_declines_staff_ticket_in_bot(self):
+        self.link()
+        ticket = self.admin.post("/api/tickets", json={"title": "Продлить домен", "description": "Домен истекает",
+                                                      "customer_id": self.user["id"], "assignee_id": self.staff["id"],
+                                                      "effort_minutes": 30}).json()["id"]
+        own = self.ticket()
+        self.show_ticket(own)
+        self.assertNotIn("Заявка не нужна", [b["text"] for row in self.last_payload()["buttons"] for b in row])
+        self.show_ticket(ticket)
+        self.click("Заявка не нужна")
+        self.click("Да, не нужна")
+        self.assertEqual(self.sql("SELECT status FROM tickets WHERE id=?", (ticket,))[0]["status"], "closed")
 
     def show_ticket(self, ticket, provider="telegram"):
         link = self.sql("SELECT * FROM bot_links WHERE provider=? AND user_id=?", (provider, self.user["id"]))[0]

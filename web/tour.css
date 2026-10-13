@@ -1,0 +1,43 @@
+/* Пошаговая навигация для заказчиков (web/tour.js). */
+.tour { position: fixed; inset: 0; z-index: 1000; }
+.tour-blocker { position: absolute; inset: 0; }
+.tour-spot {
+  position: fixed; border-radius: 12px; pointer-events: none;
+  box-shadow: 0 0 0 3px var(--accent), 0 0 0 9999px rgba(23, 34, 45, 0.55);
+  transition: left var(--dur) var(--ease-out), top var(--dur) var(--ease-out), width var(--dur) var(--ease-out), height var(--dur) var(--ease-out);
+}
+.tour-spot.tour-spot-empty { box-shadow: 0 0 0 9999px rgba(23, 34, 45, 0.55); }
+.tour-card {
+  position: fixed; width: min(360px, calc(100vw - 32px)); padding: 18px 20px 16px;
+  background: var(--card); color: var(--ink); border: 1px solid var(--line); border-radius: 16px;
+  box-shadow: 0 16px 48px rgba(23, 34, 45, 0.22); outline: none;
+  transition: left var(--dur) var(--ease-out), top var(--dur) var(--ease-out);
+}
+.tour-card.tour-enter { animation: m-pop var(--dur-slow) var(--ease-out) backwards; }
+.tour-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.tour-step { font-size: 12px; font-weight: 600; color: var(--accent-ink); }
+.tour-close {
+  width: 44px; height: 44px; margin: -12px -14px -12px 0; border: 0; border-radius: 10px;
+  background: none; color: var(--muted); font-size: 22px; line-height: 1; cursor: pointer;
+}
+.tour-close:hover { background: var(--nav-hover); color: var(--ink); }
+.tour-close:focus-visible, .tour-card .button:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.tour-card h2 { margin: 6px 0 6px; font-size: 18px; font-weight: 700; letter-spacing: -0.01em; }
+.tour-card p { margin: 0; font-size: 14px; line-height: 1.5; color: var(--ink-secondary); }
+.tour-dots { display: flex; flex-wrap: wrap; gap: 5px; margin: 16px 0 14px; }
+.tour-dots span { width: 6px; height: 6px; border-radius: 99px; background: var(--line); transition: width var(--dur) var(--ease-out), background-color var(--dur) ease; }
+.tour-dots span.passed { background: var(--accent-line); }
+.tour-dots span.current { width: 18px; background: var(--accent); }
+.tour-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.tour-actions .tour-back { margin-right: auto; }
+.tour-actions [hidden] { display: none; }
+
+/* Кнопка повторного запуска в боковом меню */
+.aside-help {
+  display: flex; align-items: center; gap: 8px; width: 100%; min-height: 40px; margin: 0 0 6px; padding: 0 10px;
+  border: 1px dashed var(--accent-line); border-radius: 9px; background: none;
+  color: var(--accent-ink); font-size: 13px; font-weight: 600; text-align: left; cursor: pointer;
+  transition: background-color var(--dur-fast) ease, border-color var(--dur-fast) ease;
+}
+.aside-help:hover { background: var(--accent-soft); border-color: var(--accent); }
+.aside-help svg { width: 18px; height: 18px; flex: none; }
