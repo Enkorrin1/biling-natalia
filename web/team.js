@@ -115,6 +115,7 @@ const TeamUI = (() => {
     const node=document.createElement('dialog');node.id='team-dialog';node.className='team-dialog';node.setAttribute('aria-labelledby','team-dialog-title');
     node.innerHTML=`<form class="team-dialog-form"><div class="team-dialog-head"><h2 id="team-dialog-title">${esc(title)}</h2><button type="button" class="icon-btn" data-close aria-label="Закрыть">×</button></div><div class="team-dialog-body">${body}<p class="team-form-error" role="alert" hidden></p></div><footer><button type="button" class="button" data-close>Закрыть</button>${onSave?`<button class="button primary" type="submit">${label}</button>`:''}</footer></form>`;
     document.body.append(node);node.showModal();
+      mountPasswordToggles(node);
     const close=()=>{node.close();node.remove();if(opener?.isConnected)opener.focus();};
     node.querySelectorAll('[data-close]').forEach(b=>b.onclick=close);
     node.addEventListener('cancel',e=>{e.preventDefault();close();});

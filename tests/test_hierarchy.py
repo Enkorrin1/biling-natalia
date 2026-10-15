@@ -16,8 +16,8 @@ class Hierarchy(unittest.TestCase):
         self.admin.post(f'/api/organizations/{oid}/members',json={'email':'o@example.com','role':'member'}).raise_for_status()
         return oid
 
-    def project(self, key, client=None, name='Интеграция CRM'):
-        response=(client or self.customer).post('/api/projects',json={'company_key':key,'name':name,'description':'Общий результат проекта'})
+    def project(self, key, name='Интеграция CRM'):
+        response=self.admin.post('/api/projects',json={'company_key':key,'name':name,'description':'Общий результат проекта'})
         self.assertEqual(response.status_code,201,response.text)
         return response.json()
 
@@ -27,6 +27,29 @@ class Hierarchy(unittest.TestCase):
         response=(client or self.customer).post('/api/tickets',json=payload)
         self.assertEqual(response.status_code,201,response.text)
         return response.json()
+
+    def test_customers_cannot_create_projects(self):
+        cid = self.customer.get('/api/me').json()['id']
+        oid = self.setup_company()
+        for client in (self.customer, self.other):
+            for key in (f'user:{cid}', f'org:{oid}'):
+                with self.subTest(key=key, customer=client.get('/api/me').json()['id']):
+                    before = self.admin.get('/api/projects').json()
+                    response = client.post('/api/projects', json={'company_key': key, 'name': 'Новый проект'})
+                    self.assertEqual(response.status_code, 403, response.text)
+                    self.assertEqual(self.admin.get('/api/projects').json(), before)
+            self.assertTrue(all(not c['can_create_project'] for c in client.get('/api/companies').json()))
+        self.assertTrue(next(c for c in self.admin.get('/api/companies').json() if c['company_key'] == f'org:{oid}')['can_create_project'])
+        p = self.project(f'org:{oid}')
+        self.ticket(p)
+
+    def test_individual_customer_cannot_create_projects(self):
+        cid = self.customer.get('/api/me').json()['id']
+        self.assertFalse(next(c for c in self.customer.get('/api/companies').json() if c['company_key'] == f'user:{cid}')['can_create_project'])
+        response = self.customer.post('/api/projects', json={'company_key': f'user:{cid}', 'name': 'Новый проект'})
+        self.assertEqual(response.status_code, 403, response.text)
+        self.assertEqual(self.customer.get('/api/projects').json(), [])
+        self.ticket(self.project(f'user:{cid}'))
 
     def test_legacy_creation_and_migration_always_link_to_default_project(self):
         before=self.customer.get('/api/billing/overview').json()['balance_minutes']
@@ -61,7 +84,7 @@ class Hierarchy(unittest.TestCase):
 
     def test_cross_company_project_injection_rolls_back_request(self):
         cid=self.customer.get('/api/me').json()['id'];other=self.other.get('/api/me').json()['id']
-        p=self.project(f'user:{other}',self.other)
+        p=self.project(f'user:{other}')
         response=self.customer.post('/api/tickets',json={'title':'Чужой проект','description':'Не должен сохраняться','project_id':p['id']})
         self.assertIn(response.status_code,(404,422))
         self.assertEqual(self.customer.get('/api/tickets').json(),[])
@@ -84,7 +107,7 @@ class Hierarchy(unittest.TestCase):
         detail=self.customer.get(f"/api/tickets/{t['id']}").json()
         self.assertEqual(detail['ticket']['project_id'],q['id']);self.assertEqual(len(detail['estimates']),1)
         self.assertEqual(detail['events'][-1]['kind'],'project_changed')
-        other=self.other.get('/api/me').json()['id'];foreign=self.project(f'user:{other}',self.other)
+        other=self.other.get('/api/me').json()['id'];foreign=self.project(f'user:{other}')
         self.assertEqual(self.admin.put(f"/api/tickets/{t['id']}/project",json={'project_id':foreign['id']}).status_code,422)
 
     def test_archive_blocks_creation_preserves_existing_ticket_and_can_reopen(self):

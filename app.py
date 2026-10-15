@@ -397,6 +397,7 @@ def init_db():
         # Billing schema extensions
         org_columns = {row["name"] for row in conn.execute("PRAGMA table_info(organizations)")}
         for col, decl in {
+            "hide_prices_from_members": "INTEGER NOT NULL DEFAULT 0",
             "hourly_rate_rub": "INTEGER NOT NULL DEFAULT 3000",
             "balance_minutes": "INTEGER NOT NULL DEFAULT 0",
             "inn": "TEXT NOT NULL DEFAULT ''",
@@ -630,6 +631,28 @@ def require_finance(user, write=False):
             raise HTTPException(403,"Нет разрешения на финансовые данные" if not write else "Нет разрешения на финансовые операции")
 
 
+def can_view_company_prices(conn, user, organization_id):
+    if user["role"] != "customer" or not organization_id:
+        return True
+    row = conn.execute("""SELECT o.hide_prices_from_members,m.role FROM organizations o
+        LEFT JOIN organization_members m ON m.organization_id=o.id AND m.user_id=? WHERE o.id=?""",
+        (user["id"], organization_id)).fetchone()
+    return bool(row and row["role"] and (not row["hide_prices_from_members"] or row["role"] == "owner"))
+
+
+def require_company_prices(conn, user, organization_id):
+    if not can_view_company_prices(conn, user, organization_id):
+        raise HTTPException(403, "Стоимость и финансовые документы доступны владельцу компании")
+
+
+def organization_public(conn, row, user):
+    item = dict(row)
+    item["can_view_prices"] = can_view_company_prices(conn, user, row["id"])
+    if not item["can_view_prices"]:
+        item.pop("hourly_rate_rub", None)
+    return item
+
+
 def ticket_for(conn, ticket_id, user, write=True):
     row = conn.execute("""SELECT t.*, c.name AS customer_name, COALESCE(o.name,cp.company_name) AS customer_company, a.name AS assignee_name,
         creator.name AS created_by_name
@@ -745,6 +768,15 @@ def customer_record(conn, row, viewer):
         item.update(hierarchy.ticket_context(conn, row))
     if viewer["role"] != "customer":
         return item
+    organization_id = item.get("organization_id")
+    if "amount_minor" in item and item.get("ticket_id"):
+        ticket = conn.execute("SELECT organization_id FROM tickets WHERE id=?", (item["ticket_id"],)).fetchone()
+        organization_id = ticket["organization_id"] if ticket else None
+    if "organization_id" in item or "amount_minor" in item:
+        item["can_view_prices"] = can_view_company_prices(conn, viewer, organization_id)
+        if not item["can_view_prices"]:
+            for key in ("hourly_rate_rub", "cost_rub", "service_cost_rub", "total_cost_rub", "act_invoice", "amount_minor", "proposed_amount_minor"):
+                item.pop(key, None)
     for key in ("assignee_id", "assignee_name", "assignee_profile", "participants"):
         item.pop(key, None)
     for prefix in ("author", "actor", "created_by"):
@@ -1131,6 +1163,13 @@ class CompanyOwnerCreate(BaseModel):
 
 class PermanentCredentials(Credentials):
     current_password: str = Field(min_length=8, max_length=128)
+    name: str = Field(min_length=2, max_length=100)
+    company_name: str = Field(min_length=2, max_length=150)
+    phone: str = Field(min_length=5, max_length=40)
+
+
+class OrganizationPriceVisibility(BaseModel):
+    hide_prices_from_members: bool
 
 
 class OrganizationCreate(BaseModel):
@@ -2581,7 +2620,7 @@ def get_ticket(ticket_id: int, desk_session: str | None = Cookie(default=None)):
             item.update(contractor_time_summary(conn, ticket_id, item["actual_minutes"]))
         item["pending_hour_request"] = bool(conn.execute("SELECT 1 FROM hour_requests WHERE ticket_id=? AND state='pending'", (ticket_id,)).fetchone())
 
-        client_org = customer_organization(conn, ticket["customer_id"])
+        client_org = {"id": ticket["organization_id"]} if ticket["organization_id"] else None
         rate_rub = 3000
         if client_org:
             org_row = conn.execute("SELECT hourly_rate_rub FROM organizations WHERE id=?", (client_org["id"],)).fetchone()
@@ -3111,6 +3150,11 @@ def replace_temporary_credentials(data: PermanentCredentials, response: Response
                                   desk_session: str | None = Cookie(default=None)):
     user = current_user(desk_session, allow_temporary=True)
     email = clean_email(data.email)
+    name = " ".join(data.name.split())
+    company = " ".join(data.company_name.split())
+    phone = data.phone.strip()
+    if len(name) < 2 or len(company) < 2 or sum(c.isdigit() for c in phone) < 5 or any(c not in "+-() 0123456789" for c in phone):
+        raise HTTPException(422, "Укажите имя, название компании и корректный телефон")
     with db() as conn:
         conn.execute("BEGIN IMMEDIATE")
         user = conn.execute("SELECT * FROM users WHERE id=?", (user["id"],)).fetchone()
@@ -3129,6 +3173,12 @@ def replace_temporary_credentials(data: PermanentCredentials, response: Response
                          (email, password_hash(data.password), user["id"]))
         except sqlite3.IntegrityError:
             raise HTTPException(409, "Email уже используется")
+        conn.execute("UPDATE users SET name=? WHERE id=?", (name, user["id"]))
+        conn.execute("""INSERT INTO customer_profiles(user_id,company_name,phone,updated_at) VALUES(?,?,?,?)
+            ON CONFLICT(user_id) DO UPDATE SET company_name=excluded.company_name,
+            phone=excluded.phone,updated_at=excluded.updated_at""", (user["id"], company, phone, now()))
+        conn.execute("""UPDATE organizations SET name=? WHERE id IN
+            (SELECT organization_id FROM organization_members WHERE user_id=? AND role='owner')""", (company, user["id"]))
         conn.execute("DELETE FROM sessions WHERE user_id=?", (user["id"],))
         user = conn.execute("SELECT * FROM users WHERE id=?", (user["id"],)).fetchone()
         response.headers["Cache-Control"] = "no-store"
@@ -3286,8 +3336,22 @@ def organizations(desk_session: str | None = Cookie(default=None)):
                 WHERE m.user_id=?""", (user["id"],)).fetchall()
         else:
             rows = []
-        return [{**dict(row), "has_available_owner": bool(available_owners(conn, row["id"])), "members": [dict(x) for x in conn.execute("""SELECT m.user_id,m.role,u.name,u.email,u.active,u.must_change_credentials,u.temporary_credentials_expires_at
+        return [{**organization_public(conn, row, user), "has_available_owner": bool(available_owners(conn, row["id"])), "members": [dict(x) for x in conn.execute("""SELECT m.user_id,m.role,u.name,u.email,u.active,u.must_change_credentials,u.temporary_credentials_expires_at
             FROM organization_members m JOIN users u ON u.id=m.user_id WHERE m.organization_id=? ORDER BY m.role,u.name""", (row["id"],))]} for row in rows]
+
+
+@app.patch("/api/organizations/{organization_id}/price-visibility")
+def update_price_visibility(organization_id: int, data: OrganizationPriceVisibility,
+                            desk_session: str | None = Cookie(default=None)):
+    user = current_user(desk_session)
+    with db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        require_company_manager(conn, user, organization_id)
+        if not conn.execute("SELECT 1 FROM organizations WHERE id=?", (organization_id,)).fetchone():
+            raise HTTPException(404, "Компания не найдена")
+        conn.execute("UPDATE organizations SET hide_prices_from_members=? WHERE id=?",
+                     (int(data.hide_prices_from_members), organization_id))
+    return {"hide_prices_from_members": data.hide_prices_from_members}
 
 
 @app.post("/api/organizations", status_code=201)
@@ -4146,6 +4210,7 @@ def test_webhook(webhook_id: int, desk_session: str | None = Cookie(default=None
 @app.get("/api/tickets/{ticket_id}/git-links")
 def get_ticket_git_links(ticket_id: int, desk_session: str | None = Cookie(default=None)):
     user = current_user(desk_session)
+    require_staff(user)
     with db() as conn:
         ticket_for(conn, ticket_id, user, write=False)
         rows = conn.execute("""
@@ -4591,6 +4656,7 @@ def get_billing_overview(desk_session: str | None = Cookie(default=None)):
             org = customer_organization(conn, user["id"])
             if org:
                 client_type = "org"
+                require_company_prices(conn, user, org["id"])
                 client_id = org["id"]
                 row = conn.execute("SELECT * FROM organizations WHERE id=?", (org["id"],)).fetchone()
                 name = row["name"]
@@ -4882,6 +4948,7 @@ def list_invoices(doc_type: str | None = None, status: str | None = None, desk_s
             org = customer_organization(conn, user["id"])
             if org:
                 conds.append("i.organization_id = ?")
+                require_company_prices(conn, user, org["id"])
                 params.append(org["id"])
             else:
                 conds.append("i.customer_id = ? AND i.organization_id IS NULL")
@@ -5038,6 +5105,7 @@ def get_invoice_detail(invoice_id: int, desk_session: str | None = Cookie(defaul
         row = conn.execute("SELECT * FROM invoices WHERE id=?", (invoice_id,)).fetchone()
         if not row:
             raise HTTPException(404, "Документ не найден")
+        require_company_prices(conn, user, row["organization_id"])
         if user["role"] == "customer":
             org = customer_organization(conn, user["id"])
             if row["organization_id"]:
@@ -5059,6 +5127,7 @@ def print_invoice_document(invoice_id: int, desk_session: str | None = Cookie(de
         row = conn.execute("SELECT * FROM invoices WHERE id=?", (invoice_id,)).fetchone()
         if not row:
             raise HTTPException(404, "Документ не найден")
+        require_company_prices(conn, user, row["organization_id"])
         if user["role"] == "customer":
             org = customer_organization(conn, user["id"])
             if row["organization_id"]:

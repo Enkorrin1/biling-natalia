@@ -1,4 +1,4 @@
-const CACHE_NAME = 'codari-navigation-v14';
+const CACHE_NAME = 'codari-components-v18';
 const STATIC_ASSETS = [
   '/?login',
   '/landing',

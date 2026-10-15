@@ -67,7 +67,9 @@ class Flows(unittest.TestCase):
         stale = TestClient(service.app)
         stale.post("/api/login", json=login)
         credentials = {"email": "permanent@example.com", "password": "NewPassword123!",
+                       "name": "Имя владельца", "company_name": "Компания клиента", "phone": "+375 29 1234567",
                        "current_password": access["temporary_password"]}
+        self.assertEqual(owner.post("/api/account/credentials", json={**credentials, "phone": "abcde"}).status_code, 422)
         self.assertEqual(owner.post("/api/account/credentials", json={**credentials, "email": "c@example.com"}).status_code, 409)
         self.assertEqual(owner.post("/api/account/credentials", json={**credentials, "current_password": "wrongpassword"}).status_code, 403)
         self.assertEqual(owner.post("/api/account/credentials", json={**credentials, "password": access["temporary_password"]}).status_code, 422)
@@ -80,6 +82,10 @@ class Flows(unittest.TestCase):
         company = owner.get("/api/organizations").json()[0]
         self.assertEqual(company["id"], access["organization_id"])
         self.assertEqual(company["members"][0]["role"], "owner")
+        self.assertEqual(company["name"], credentials["company_name"])
+        profile = owner.get('/api/customer-profile/me').json()
+        self.assertEqual(profile['phone'], credentials['phone'])
+        self.assertEqual(profile['name'], credentials['name'])
         self.assertEqual(owner.post("/api/login", json=login).status_code, 401)
         self.assertEqual(owner.post("/api/login", json={"email": credentials["email"], "password": credentials["password"]}).status_code, 200)
         second = self.admin.post("/api/company-owners", json={"name": "Second Owner", "organization_id": company["id"]})

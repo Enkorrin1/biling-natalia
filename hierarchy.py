@@ -126,6 +126,10 @@ def manages_company(conn, user, key, domain):
         domain.team_management.has_permission(conn,user,'clients') and can_company(conn,user,key,domain))
 
 
+def can_create_project(conn, user, key, domain):
+    return user['role'] != 'customer' and manages_company(conn, user, key, domain)
+
+
 def ticket_context(conn, ticket):
     item = dict(ticket)
     key = company_key(ticket)
@@ -272,6 +276,7 @@ def inbox(conn, user, domain):
                 ctx.update(project_id=p['id'],project_name=p['name'])
                 target,rid,url='project',p['id'],f"/#project/{p['id']}"
             elif row['invoice_id']:
+                domain.require_company_prices(conn,user,row['organization_id'])
                 if user['role']!='customer':
                     domain.require_finance(user)
                 target,rid,url='invoice',row['invoice_id'],f"/#invoice/{row['invoice_id']}"
@@ -308,8 +313,9 @@ def install_routes(app, domain):
                 if not projects and not can_company(conn,user,key,domain):
                     continue
                 result.append({**ctx,'projects':projects,'project_count':len(projects),
+                               'can_view_prices':domain.can_view_company_prices(conn,user,ctx['organization_id']),
                                'open_count':sum(p['open_count'] for p in projects),
-                               'can_create_project':manages_company(conn,user,key,domain), 'can_create_ticket':can_company(conn,user,key,domain,True)})
+                               'can_create_project':can_create_project(conn,user,key,domain), 'can_create_ticket':can_company(conn,user,key,domain,True)})
             return sorted(result,key=lambda c:c['company_name'].casefold())
 
     @router.get('/projects')
@@ -339,6 +345,7 @@ def install_routes(app, domain):
                 raise HTTPException(404, 'Компания недоступна')
             if user['role'] != 'customer':
                 domain.require_finance(user)
+            domain.require_company_prices(conn, user, cid if kind == 'org' else None)
             client = domain.get_client_billing_info(conn, kind, cid)
             cond, params = domain.client_condition(kind, cid)
             active = conn.execute(f"SELECT id FROM tickets WHERE {cond} AND status IN ('new','working','waiting')", params).fetchall()
@@ -370,7 +377,7 @@ def install_routes(app, domain):
         with domain.db() as conn:
             conn.execute('BEGIN IMMEDIATE')
             ctx = company_context(conn,data.company_key)
-            if not manages_company(conn,user,data.company_key,domain):
+            if not can_create_project(conn,user,data.company_key,domain):
                 raise HTTPException(403,'Нет права создавать проекты компании')
             duplicate = conn.execute('SELECT 1 FROM client_projects WHERE COALESCE(organization_id,0)=? AND COALESCE(customer_id,0)=? AND lower(name)=lower(?) AND state!=\'archived\'',(ctx['organization_id'] or 0,ctx['customer_id'] or 0,name)).fetchone()
             if duplicate:
